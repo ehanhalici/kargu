@@ -36,7 +36,7 @@
       (let ((check (lambda ()
                      (and (eq mode (or (plist-get kargu--loop-run :mode) (kargu-state-mode)))
                           (eql revision (kargu-session-mode-revision (kargu-session-context)))
-                          (kargu-permission--operation-valid-p operation)))))
+                          (kargu-permission-operation-valid-p operation)))))
         (if context
             (and (kargu-execution-live-p context) (kargu-execution-call context check))
           (with-current-buffer (kargu-permission-operation-origin operation) (funcall check))))
@@ -59,7 +59,7 @@ This function does not start a process, ask for permission or wait for IPC."
       (error "Native output capacity must be 0..4194304 bytes"))
     (kargu-bridge-command--create
      :owner (current-buffer)
-     :arguments (kargu-bridge-approval--copy
+     :arguments (kargu-json-detach
                  (kargu-bridge--object
                   "root" root "mode" (symbol-name mode) "program" program "arguments" (vconcat argv)
                   "cwd" directory "timeout_ms" (if timeout (ceiling (* 1000 timeout)) :json-null)

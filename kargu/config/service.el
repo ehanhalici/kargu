@@ -16,6 +16,7 @@
 (require 'kargu/application/coordinator)
 (require 'kargu/async)
 (require 'kargu/bridge/config-policy)
+(require 'kargu/json)
 
 (defconst kargu-config-refresh-default-timeout 5.0
   "Maximum editor deadline for native file capture and configuration parsing.")
@@ -72,19 +73,6 @@
                  (puthash (kargu-config-copy key) (kargu-config-copy item) copy)) value)
       copy))
    (t value)))
-
-(defun kargu-config-json-equal (left right)
-  "Compare bounded JSON LEFT and RIGHT by value, including hash-table contents."
-  (cond
-   ((hash-table-p left)
-    (and (hash-table-p right) (= (hash-table-count left) (hash-table-count right))
-         (let ((same t) (missing (make-symbol "missing")))
-           (maphash (lambda (key value)
-                      (unless (kargu-config-json-equal value (gethash key right missing)) (setq same nil))) left)
-           same)))
-   ((vectorp left) (and (vectorp right) (= (length left) (length right))
-			(cl-every #'kargu-config-json-equal left right)))
-   (t (equal left right))))
 
 (defun kargu-config-current-snapshot ()
   "Return a detached copy of the current validated configuration snapshot."

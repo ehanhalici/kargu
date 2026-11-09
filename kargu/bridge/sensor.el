@@ -18,6 +18,7 @@
 (require 'kargu/bridge/session)
 (require 'kargu/bridge/edit/document)
 (require 'kargu/core/session)
+(require 'kargu/json)
 
 (declare-function kargu-lsp-snapshot-source "kargu/tools/lsp/snapshot" (&optional flush))
 (declare-function kargu-bridge-sensor-symbols-call "kargu/bridge/sensor/symbols" (connection id params))
@@ -60,21 +61,6 @@
   "Detach bounded wire VALUE with the bridge's JSON representation."
   (kargu-bridge--decode (json-serialize value :null-object :json-null :false-object :json-false)))
 
-(defun kargu-bridge-sensor--equal-p (left right)
-  "Compare bounded JSON LEFT and RIGHT by contents."
-  (cond
-   ((hash-table-p left)
-    (and (hash-table-p right) (= (hash-table-count left) (hash-table-count right))
-         (let ((same t))
-           (maphash (lambda (key value)
-                      (unless (kargu-bridge-sensor--equal-p value (gethash key right :missing))
-                        (setq same nil))) left)
-           same)))
-   ((vectorp left)
-    (and (vectorp right) (= (length left) (length right))
-         (cl-every #'kargu-bridge-sensor--equal-p left right)))
-   (t (equal left right))))
-
 (defun kargu-bridge-sensor--document (buffer root)
   "Observe BUFFER's identity and tick within captured ROOT without reading text."
   (with-current-buffer buffer
@@ -99,7 +85,7 @@
     (and (eq entry (kargu-bridge-sensor-call-entry call))
          (buffer-live-p owner)
          (eq (kargu-session-context owner) (kargu-bridge-sensor-call-session call))
-         (cl-every (lambda (key) (kargu-bridge-sensor--equal-p
+         (cl-every (lambda (key) (kargu-json-equal
                                   (gethash key original) (gethash key params)))
                    '("request_id" "connection_epoch" "scope" "root" "call_id" "tool" "arguments" "parent_tool")))))
 
@@ -121,7 +107,7 @@
   (let ((root (gethash "root" (kargu-bridge-sensor-call-params call))))
     (and (kargu-bridge-sensor--same-call-p connection call params)
          (buffer-live-p (kargu-bridge-sensor-call-buffer call))
-         (kargu-bridge-sensor--equal-p
+         (kargu-json-equal
           (kargu-bridge-sensor-call-resource call)
           (kargu-bridge-sensor--language-document (kargu-bridge-sensor-call-buffer call) root)))))
 

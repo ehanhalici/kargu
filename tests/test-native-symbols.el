@@ -114,7 +114,7 @@
                 ((symbol-function 'eglot--signal-textDocument/didChange) (lambda () (cl-incf flushes))))
         (let ((first (kargu-lsp-snapshot-source t)))
           (should (= flushes 1))
-          (should (kargu-bridge-sensor--equal-p first (kargu-lsp-snapshot-source)))
+          (should (kargu-json-equal first (kargu-lsp-snapshot-source)))
           (setq process 'process-2)
           (should-not (equal (gethash "server" first) (gethash "server" (kargu-lsp-snapshot-source))))
           (setq eglot--versioned-identifier 4)

@@ -45,7 +45,7 @@
                            (kargu-bridge--fault "owner_closed")))))
         (setcar ticket nil)
         (kargu-bridge--callback
-         callback (unless failure (kargu-bridge-application--copy-scope
+         callback (unless failure (kargu-bridge-application-copy-scope
                                    (kargu-bridge-conversation-scope binding))) failure)))))
 
 (defun kargu-bridge-conversation--close (binding)
@@ -69,7 +69,7 @@
         (setf (kargu-bridge-conversation-state binding) :closed)
       (kargu-bridge-call
        connection "session/close"
-       (kargu-bridge-application--copy-scope (kargu-bridge-conversation-scope binding))
+       (kargu-bridge-application-copy-scope (kargu-bridge-conversation-scope binding))
        (lambda (_result failure)
          (setf (kargu-bridge-conversation-state binding) (if failure :failed :closed)
                (kargu-bridge-conversation-fault binding) failure))))))
@@ -105,7 +105,7 @@
              (kargu-bridge-conversation-fault binding) (kargu-bridge--fault "protocol_error"))
        (kargu-bridge-conversation--notify binding (kargu-bridge-conversation-fault binding)))
       (t
-       (setf (kargu-bridge-conversation-scope binding) (kargu-bridge-application--copy-scope scope))
+       (setf (kargu-bridge-conversation-scope binding) (kargu-bridge-application-copy-scope scope))
        (if (or (eq (kargu-bridge-conversation-state binding) :closing)
                (not (kargu-bridge-conversation--current-p binding)))
            (progn
@@ -123,7 +123,7 @@ No session is created here; a missing or retired lease returns nil."
               ((eq connection (kargu-bridge-conversation-connection binding)))
               ((eq (kargu-bridge-conversation-state binding) :ready))
               ((kargu-bridge-conversation--current-p binding)))
-    (kargu-bridge-application--copy-scope (kargu-bridge-conversation-scope binding))))
+    (kargu-bridge-application-copy-scope (kargu-bridge-conversation-scope binding))))
 
 (defun kargu-bridge-conversation-ensure (connection application session service-scope callback)
   "Deliver SESSION's conversation lease to CALLBACK (SCOPE FAILURE).
@@ -149,7 +149,7 @@ Return a waiter cleanup; cancelling a waiter cannot cancel a sibling's lease."
         (setq binding (kargu-bridge-conversation--make
                        :connection connection :application application
                        :epoch (copy-sequence (kargu-bridge-connection-epoch connection))
-                       :service-scope (kargu-bridge-application--copy-scope service-scope)))
+                       :service-scope (kargu-bridge-application-copy-scope service-scope)))
         (puthash application binding table)
         (let* ((origin (current-buffer))
                (retire (lambda () (kargu-bridge-conversation-retire session))))
@@ -163,7 +163,7 @@ Return a waiter cleanup; cancelling a waiter cannot cancel a sibling's lease."
         (kargu-bridge-conversation--start binding))
       (pcase (kargu-bridge-conversation-state binding)
         (:ready
-         (kargu-bridge--callback callback (kargu-bridge-application--copy-scope
+         (kargu-bridge--callback callback (kargu-bridge-application-copy-scope
                                          (kargu-bridge-conversation-scope binding)) nil) #'ignore)
         (:starting
          (if (>= (length (kargu-bridge-conversation-waiters binding)) kargu-bridge--max-pending)

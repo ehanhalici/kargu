@@ -13,6 +13,7 @@
 (require 'kargu/async)
 (require 'kargu/application/coordinator)
 (require 'kargu/core/session)
+(require 'kargu/json)
 
 (defun kargu-bridge-read--elapsed-p (task)
   "Return non-nil when TASK's absolute deadline elapsed before timer dispatch."
@@ -36,9 +37,7 @@
   "Deliver CALLBACK through native REQUEST with captured ARGUMENTS.
 Keep the parent task, owner buffer and take-once RPC cleanup.
 DECODE optionally converts a successful native DTO before delivery."
-  (let* ((arguments (json-parse-string
-                     (json-serialize arguments :null-object :json-null :false-object :json-false)
-                     :object-type 'hash-table :array-type 'array :null-object :json-null :false-object :json-false))
+  (let* ((arguments (kargu-json-detach arguments))
          (owner (current-buffer))
          (mode major-mode)
          (session (kargu-session-context))

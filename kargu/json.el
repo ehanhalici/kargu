@@ -163,6 +163,28 @@ Arbitrary nested array data must already use vectors."
                         (kargu-json--record-value value (1+ depth))) object)))
      (t object))))
 
+(defun kargu-json-equal (left right)
+  "Compare bounded JSON LEFT and RIGHT by value, including hash-table contents."
+  (cond
+   ((hash-table-p left)
+    (and (hash-table-p right) (= (hash-table-count left) (hash-table-count right))
+         (let ((same t) (missing (make-symbol "missing")))
+           (maphash (lambda (key value)
+                      (unless (kargu-json-equal value (gethash key right missing))
+                        (setq same nil)))
+                    left)
+           same)))
+   ((vectorp left) (and (vectorp right) (= (length left) (length right))
+                        (cl-every #'kargu-json-equal left right)))
+   (t (equal left right))))
+
+(defun kargu-json-detach (value)
+  "Return typed wire VALUE detached from every mutable container of its caller.
+Objects come back as hash tables and arrays as vectors."
+  (json-parse-string (json-serialize value :null-object :json-null :false-object :json-false)
+                     :object-type 'hash-table :array-type 'array
+                     :null-object :json-null :false-object :json-false))
+
 (defun kargu-json-record-wire (record)
   "Return native agent RECORD as typed wire hash tables and vectors.
 A nil value becomes JSON null, never an empty object, so the native

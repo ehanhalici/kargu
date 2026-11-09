@@ -212,13 +212,13 @@ Snapshots are retained.  Use LEASE and deliver acknowledgement to CALLBACK."
   (when lease
     (list :connection (plist-get lease :connection)
           :epoch (copy-sequence (plist-get lease :epoch))
-          :scope (kargu-bridge-application--copy-scope (plist-get lease :scope))
+          :scope (kargu-bridge-application-copy-scope (plist-get lease :scope))
           :application (plist-get lease :application))))
 
 (defun kargu-bridge-edit-history-capture-lease (application connection scope)
   "Capture APPLICATION's existing CONNECTION and SCOPE without acquiring a lease."
   (list :connection connection :epoch (copy-sequence (kargu-bridge-connection-epoch connection))
-        :scope (kargu-bridge-application--copy-scope scope) :application application))
+        :scope (kargu-bridge-application-copy-scope scope) :application application))
 
 (defun kargu-bridge-edit-history-lease-current-p (lease)
   "Whether LEASE still identifies its original application, epoch and scope."
@@ -235,7 +235,7 @@ Use captured LEASE when supplied; otherwise capture the current binding."
   (let* ((binding (and application (gethash :native-core (kargu-application-services application))))
          (connection (if lease (plist-get lease :connection)
                        (and binding (kargu-bridge-application-connection binding))))
-         (scope (if lease (kargu-bridge-application--copy-scope (plist-get lease :scope))
+         (scope (if lease (kargu-bridge-application-copy-scope (plist-get lease :scope))
                   (and connection (kargu-bridge-application-current-scope application connection))))
          (epoch (if lease (copy-sequence (plist-get lease :epoch))
                   (and connection (copy-sequence (kargu-bridge-connection-epoch connection)))))

@@ -21,7 +21,7 @@
 (declare-function kargu-config-revision "kargu/config/schema" ())
 (declare-function kargu-config-native-view "kargu/config/service" ())
 
-(defun kargu-bridge-config-policy--inputs ()
+(defun kargu-bridge-config-policy-inputs ()
   "Freeze bounded editor inputs behind a non-printing, private capability.
 Environment names are interpreted only by Rust; unrelated values stay local."
   (let ((cell (make-symbol "kargu-config-inputs")) (bytes 0) (count 0) environment)
@@ -44,12 +44,12 @@ Environment names are interpreted only by Rust; unrelated values stay local."
         ((vectorp value) (mapc #'kargu-bridge-config-policy--wipe value))
         ((hash-table-p value) (maphash (lambda (_key item) (kargu-bridge-config-policy--wipe item)) value))))
 
-(defun kargu-bridge-config-policy--release-inputs (cell)
+(defun kargu-bridge-config-policy-release-inputs (cell)
   "Release and clear CELL's private captures, idempotently."
   (kargu-bridge-config-policy--wipe (symbol-plist cell))
   (setplist cell nil))
 
-(defun kargu-bridge-config-policy--captured-context (cell names &optional publication)
+(defun kargu-bridge-config-policy-captured-context (cell names &optional publication)
   "Project native-requested NAMES from immutable editor input CELL.
 PUBLICATION includes header metadata; transient credential source DTOs do not."
   (let ((process-environment (get cell 'environment))
@@ -134,7 +134,7 @@ METADATA includes detached header DTOs for native publication."
   "Send METHOD/ARGUMENTS for TASK on captured CONNECTION/SCOPE to CALLBACK."
   (kargu-bridge-call
    connection method
-   (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope) "arguments" arguments)
+   (kargu-bridge--object "scope" (kargu-bridge-application-copy-scope scope) "arguments" arguments)
    callback :timeout (max 0.001 (- (kargu-async-task-deadline task) (float-time)))))
 
 (cl-defun kargu-bridge-config-stage (method arguments callback &key parent application valid-p)
@@ -144,7 +144,7 @@ variables it needs; this port only answers that request from frozen editor
 inputs.  CALLBACK receives (VIEW FAILURE); an invalid source arrives as a
 VIEW whose status is \"invalid\".  VALID-P guards the captured editor intent
 under PARENT and APPLICATION.  This port never updates an editor cache."
-  (let* ((inputs (kargu-bridge-config-policy--inputs))
+  (let* ((inputs (kargu-bridge-config-policy-inputs))
          (task (kargu-async-start (kargu-application-wrap application callback) :parent parent :owner nil :timeout 5))
          connection scope ticket commit-sent)
     (put inputs 'arguments (kargu-config-copy arguments))
@@ -181,7 +181,7 @@ under PARENT and APPLICATION.  This port never updates an editor cache."
               ((not (live)) (abort) (finish nil (kargu-bridge--fault "stale_configuration")))
               (t
                (condition-case nil
-                   (let ((context (kargu-bridge-config-policy--captured-context
+                   (let ((context (kargu-bridge-config-policy-captured-context
                                    inputs (gethash "environment_names" value) t)))
                      (setq commit-sent t)
                      (kargu-bridge-config-policy--call
@@ -193,7 +193,7 @@ under PARENT and APPLICATION.  This port never updates an editor cache."
              (setq scope value)
              (when (live)
                (let ((request (kargu-config-copy (get inputs 'arguments))))
-                 (puthash "registry" (gethash "registry" (kargu-bridge-config-policy--captured-context inputs [])) request)
+                 (puthash "registry" (gethash "registry" (kargu-bridge-config-policy-captured-context inputs [])) request)
                  (puthash "timeout_ms" (max 1 (min 5000 (floor (* 1000 (- (kargu-async-task-deadline task) (float-time))))))
                           request)
                  (kargu-bridge-config-policy--call task connection scope method request #'staged)))))
@@ -206,7 +206,7 @@ under PARENT and APPLICATION.  This port never updates an editor cache."
              (finish nil (kargu-bridge--fault "unsupported_configuration_policy")))
             (t (kargu-async-add-cleanup task (kargu-bridge-application-ensure connection application #'scoped))))))
       (kargu-async-add-cleanup task #'abort)
-      (kargu-async-add-cleanup task (lambda () (kargu-bridge-config-policy--release-inputs inputs)))
+      (kargu-async-add-cleanup task (lambda () (kargu-bridge-config-policy-release-inputs inputs)))
       (when (kargu-async-pending-p task)
         (if-let* ((binding (gethash :native-core (kargu-application-services application))))
             (ready (kargu-bridge-application-connection binding) nil)

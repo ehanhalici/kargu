@@ -20,7 +20,7 @@
   connection scope waiters close-waiters finalizer fault
   (identity (make-symbol "kargu-native-application")) (state :starting))
 
-(defun kargu-bridge-application--copy-scope (scope)
+(defun kargu-bridge-application-copy-scope (scope)
   "Return detached native SCOPE identifiers, never shared mutable strings."
   (kargu-bridge--object
    "application_id" (copy-sequence (gethash "application_id" scope))
@@ -38,7 +38,7 @@
                                         (eq (kargu-bridge-status (kargu-bridge-application-connection binding)) 'ready))
                              (kargu-bridge--fault "owner_closed")))))
           (kargu-bridge--callback callback
-                                  (unless failure (kargu-bridge-application--copy-scope
+                                  (unless failure (kargu-bridge-application-copy-scope
                                                    (kargu-bridge-application-scope binding))) failure))))))
 
 (defun kargu-bridge-application--dispose (connection identity)
@@ -110,7 +110,7 @@ Never start a process here.  Active work and explicit close use owned drain."
                             (string-prefix-p "sess_" (gethash "session_id" scope))))
                   (kargu-bridge-application--failed binding (kargu-bridge--fault "protocol_error")))
                  (t
-                  (setf (kargu-bridge-application-scope binding) (kargu-bridge-application--copy-scope scope)
+                  (setf (kargu-bridge-application-scope binding) (kargu-bridge-application-copy-scope scope)
                         (kargu-bridge-application-state binding) :ready)
                   (kargu-bridge-application--notify binding nil)))))))))))))
 
@@ -139,7 +139,7 @@ Return a waiter cleanup; cancelling one waiter cannot revoke a sibling lease."
         (kargu-bridge-application--start binding))
       (pcase (kargu-bridge-application-state binding)
         (:ready
-         (kargu-bridge--callback callback (kargu-bridge-application--copy-scope
+         (kargu-bridge--callback callback (kargu-bridge-application-copy-scope
                                            (kargu-bridge-application-scope binding)) nil) #'ignore)
         (:starting
          (if (>= (length (kargu-bridge-application-waiters binding)) kargu-bridge--max-pending)
@@ -177,7 +177,7 @@ The returned identifiers are detached; nil means the lease is not current."
     (when (and binding (eq connection (kargu-bridge-application-connection binding))
                (eq (kargu-bridge-status connection) 'ready)
                (eq (kargu-bridge-application-state binding) :ready))
-      (kargu-bridge-application--copy-scope (kargu-bridge-application-scope binding)))))
+      (kargu-bridge-application-copy-scope (kargu-bridge-application-scope binding)))))
 
 (defun kargu-bridge-application-close (application &optional callback)
   "Revoke APPLICATION's native lease; invoke CALLBACK only after core drain.

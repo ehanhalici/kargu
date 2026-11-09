@@ -74,8 +74,8 @@ FAILURE cannot establish effects."
              (resource (and (buffer-live-p buffer)
                             (kargu-bridge-sensor--language-document buffer root))))
         (and resource
-             (kargu-bridge-sensor--equal-p document (gethash "document" resource))
-             (kargu-bridge-sensor--equal-p (gethash "source" selection) (gethash "source" resource))))
+             (kargu-json-equal document (gethash "document" resource))
+             (kargu-json-equal (gethash "source" selection) (gethash "source" resource))))
     (error nil)))
 
 (defun kargu-bridge-native-edit--spec (connection edit)
@@ -163,7 +163,7 @@ FAILURE cannot establish effects."
   (let* ((call-id (and (hash-table-p params) (gethash "call_id" params)))
          (edit (gethash call-id (kargu-bridge-connection-native-edits connection))))
     (when (and edit (kargu-bridge-native-edit--current-p connection edit)
-               (cl-every (lambda (key) (kargu-bridge-sensor--equal-p
+               (cl-every (lambda (key) (kargu-json-equal
                                         (gethash key params)
                                         (gethash key (kargu-bridge-native-edit-params edit))))
                          '("request_id" "connection_epoch" "scope" "call_id" "origin_id")))

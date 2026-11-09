@@ -52,7 +52,7 @@ PARENT and VALID-P guard the captured source.  Failure revokes the patch handle.
     (condition-case nil
         (let ((arguments (kargu-bridge-edit--arguments artifact)))
           (puthash "path" (copy-sequence path) arguments)
-          (puthash "document" (kargu-bridge-edit--copy document) arguments)
+          (puthash "document" (kargu-json-detach document) arguments)
           (kargu-bridge-edit--detach transfer (list (cons "document" text)))
           (if (not (kargu-bridge-edit--live-p transfer))
               (kargu-bridge-edit--fail transfer (kargu-bridge--fault "stale_edit_preparation"))

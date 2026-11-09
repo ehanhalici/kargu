@@ -88,7 +88,7 @@
          (job (and (stringp id) (string-prefix-p "job_" id)
                    (kargu-bridge-job--create
                     :connection connection :id id :pid (gethash "process_id" receipt)
-                    :root root :scope (kargu-bridge-approval--copy (kargu-bridge-connection-read-scope connection))
+                    :root root :scope (kargu-json-detach (kargu-bridge-connection-read-scope connection))
                     :owner owner :session (kargu-session-context owner)))))
     (if (not job) (kargu-bridge--callback callback nil (kargu-bridge--fault "protocol_error"))
       (setf (kargu-bridge-job-owner-cleanup job) (lambda () (kargu-bridge-job-dispose job)))
@@ -110,7 +110,7 @@
   "Start explicit ARGUMENTS on CONNECTION; CALLBACK receives (JOB ERROR).
 Install OWNER cleanup before claiming startup; OWNER defaults to current buffer."
   (let* ((owner (or owner (current-buffer)))
-         (snapshot (kargu-bridge-approval--copy arguments))
+         (snapshot (kargu-json-detach arguments))
          (root (directory-file-name (file-truename (gethash "root" snapshot)))))
     (kargu-bridge-approval-execute
      connection snapshot

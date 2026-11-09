@@ -37,7 +37,7 @@
              (kargu-bridge-file-observation-entry observation))
          (buffer-live-p owner)
          (eq (kargu-session-context owner) (kargu-bridge-file-observation-session observation))
-         (cl-every (lambda (key) (kargu-bridge-sensor--equal-p
+         (cl-every (lambda (key) (kargu-json-equal
                                   (gethash key params) (gethash key original)))
                    '("request_id" "connection_epoch" "scope" "call_id")))))
 
@@ -45,7 +45,7 @@
   "Check OBSERVATION still owns immutable PARAMS on exact CONNECTION."
   (let ((original (kargu-bridge-file-observation-params observation)))
     (and (kargu-bridge-file--same-owner-p connection observation params)
-         (cl-every (lambda (key) (kargu-bridge-sensor--equal-p
+         (cl-every (lambda (key) (kargu-json-equal
                                   (gethash key params) (gethash key original)))
                    '("root" "tool" "arguments")))))
 
@@ -128,7 +128,7 @@
                   ((error quit) nil)))
          (current (condition-case nil
                       (and owned
-                           (kargu-bridge-sensor--equal-p
+                           (kargu-json-equal
                             (gethash "observation" params) (kargu-bridge-file-observation-stamp observation))
                            (let* ((original (kargu-bridge-file-observation-params observation))
                                   (root (gethash "root" original))
@@ -140,7 +140,7 @@
                                       (and (buffer-live-p buffer) (eq now buffer)
                                            (eq (gethash "dirty" (kargu-bridge-file-observation-stamp observation))
                                                (with-current-buffer buffer (if (buffer-modified-p) t :json-false)))
-                                           (kargu-bridge-sensor--equal-p
+                                           (kargu-json-equal
                                             (gethash "document" (kargu-bridge-file-observation-stamp observation))
                                             (gethash "document" (kargu-bridge-sensor--document buffer root))))
                                     (null now)))))

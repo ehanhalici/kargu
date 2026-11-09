@@ -26,7 +26,7 @@
 
 (declare-function kargu-lsp-diagnostics-snapshot "kargu/tools/lsp/diagnostics" (file-path))
 (declare-function kargu-lsp-current-diagnostics-p "kargu/tools/lsp/freshness" (buffer))
-(declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/freshness" ())
+(declare-function kargu-lsp-diagnostic-backends "kargu/tools/lsp/freshness" ())
 (declare-function eglot-current-server "eglot" ())
 (declare-function jsonrpc--process "jsonrpc" (connection))
 (declare-function kargu-bridge-edit-history-consume "kargu/bridge/edit/history"
@@ -102,8 +102,8 @@ Owned by `kargu-edit-service'.")
                 :server-version (and (boundp 'eglot--versioned-identifier)
                                      eglot--versioned-identifier)
                 :backends (and (bound-and-true-p flymake-mode)
-                               (fboundp 'kargu-lsp--diagnostic-backends)
-                               (copy-sequence (kargu-lsp--diagnostic-backends)))))))))
+                               (fboundp 'kargu-lsp-diagnostic-backends)
+                               (copy-sequence (kargu-lsp-diagnostic-backends)))))))))
 
 (defun kargu-diff--replace-buffer-preserving-view (buffer new-content)
   "Replace widened contents of BUFFER with NEW-CONTENT, keeping view and point."

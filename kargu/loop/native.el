@@ -140,7 +140,7 @@ port serve; debugger tools have no reverse handler and stay unlisted."
                                    (max 1 (round (- (kargu-run-budget-deadline budget-obj) (float-time)))))
                               (if kargu-stream kargu-api-stream-ceiling kargu-api-timeout)
                               90))
-            (timeout-ms (kargu-transport--milliseconds timeout-secs))
+            (timeout-ms (kargu-transport-milliseconds timeout-secs))
             (turn-limit (or (plist-get run :max-iterations) kargu-max-iterations 12))
             (observer (or (plist-get run :retry-observer) "none")))
        (setcdr (assoc "session" auth) (plist-get run :session-id))
@@ -173,9 +173,9 @@ port serve; debugger tools have no reverse handler and stay unlisted."
          "auth" (kargu-providers-wire-object auth)
          "stream" (if kargu-stream t :json-false)
          "timeouts" (kargu-bridge--object
-                     "connect_ms" (kargu-transport--milliseconds kargu-api-connect-timeout)
-                     "first_byte_ms" (kargu-transport--milliseconds kargu-api-first-byte-timeout)
-                     "idle_ms" (kargu-transport--milliseconds kargu-api-stall-timeout)
+                     "connect_ms" (kargu-transport-milliseconds kargu-api-connect-timeout)
+                     "first_byte_ms" (kargu-transport-milliseconds kargu-api-first-byte-timeout)
+                     "idle_ms" (kargu-transport-milliseconds kargu-api-stall-timeout)
                      "deadline_ms" timeout-ms))
         "retry" (kargu-bridge--object
                  "observer" observer

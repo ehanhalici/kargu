@@ -17,7 +17,7 @@
 (defvar kargu-lsp--publication nil)
 (defvar kargu-lsp--backend-reports nil)
 (declare-function kargu-lsp-coordinate-range "kargu/tools/lsp/coordinates" (start end))
-(declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/freshness" ())
+(declare-function kargu-lsp-diagnostic-backends "kargu/tools/lsp/freshness" ())
 (declare-function kargu-lsp--publication-process "kargu/tools/lsp/freshness" (pub))
 (declare-function kargu-lsp--publication-server "kargu/tools/lsp/freshness" (pub))
 (declare-function kargu-lsp--publication-version "kargu/tools/lsp/freshness" (pub))
@@ -90,7 +90,7 @@
     (save-excursion
       (save-restriction
         (widen)
-        (let ((backends (and flymake-mode (kargu-lsp--diagnostic-backends))) reports findings truncated)
+        (let ((backends (and flymake-mode (kargu-lsp-diagnostic-backends))) reports findings truncated)
           (when (> (length backends) 64) (setq backends (seq-take backends 64) truncated t))
           (dolist (backend backends)
             (let* ((report (and kargu-lsp--backend-reports (gethash backend kargu-lsp--backend-reports)))
@@ -199,7 +199,7 @@ Rust owns grouping, deduplication, supersession and rendering."
         (progn
           (unless (and call (eq (kargu-bridge-sensor-call-state call) :prepared)
                        (kargu-bridge-sensor--same-call-p connection call params)
-                       (kargu-bridge-sensor--equal-p (gethash "resource" params)
+                       (kargu-json-equal (gethash "resource" params)
                                                    (kargu-bridge-sensor-call-resource call)))
             (error "Unowned diagnostic invocation"))
           (setq entered t)
@@ -212,7 +212,7 @@ Rust owns grouping, deduplication, supersession and rendering."
                    (pcase (gethash "kind" resource)
                      ("document"
                       (unless (and (buffer-live-p buffer)
-                                   (kargu-bridge-sensor--equal-p resource (kargu-bridge-sensor--document buffer root)))
+                                   (kargu-json-equal resource (kargu-bridge-sensor--document buffer root)))
                         (error "Diagnostic document unavailable"))
                       (kargu-bridge--object "kind" "diagnostics" "snapshot"
                                             (kargu-bridge-diagnostics--snapshot buffer root (gethash "document" resource))))

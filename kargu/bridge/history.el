@@ -23,7 +23,7 @@
 CALLBACK receives (TEXT FAILURE).  PARENT, OWNER and VALID-P bind UI lifetime.
 No partial text is delivered after cancellation, malformed pages
 or revision loss."
-  (let* ((scope (kargu-bridge-application--copy-scope scope))
+  (let* ((scope (kargu-bridge-application-copy-scope scope))
          (message-id (copy-sequence message-id))
          (epoch (copy-sequence (kargu-bridge-connection-epoch connection)))
          (origin (or owner (current-buffer)))

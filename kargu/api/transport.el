@@ -64,7 +64,7 @@
       (kargu-bridge-cancel (kargu-transport-handle-connection handle)
                            (kargu-transport-handle-id handle)))))
 
-(defun kargu-transport--milliseconds (seconds)
+(defun kargu-transport-milliseconds (seconds)
   "Translate positive SECONDS to wire milliseconds, otherwise explicit null."
   (if (and (numberp seconds) (> seconds 0)) (max 1 (ceiling (* seconds 1000))) :json-null))
 
@@ -140,7 +140,7 @@ HANDLE and OPTIONS own delivery on CONNECTION."
           (puthash "retry" configuration params)))
       (setf (kargu-transport-handle-connection handle) connection
             (kargu-transport-handle-native-scope handle)
-            (when (plist-get options :circuit) (kargu-bridge-application--copy-scope scope))
+            (when (plist-get options :circuit) (kargu-bridge-application-copy-scope scope))
             (kargu-transport-handle-id handle)
             (kargu-bridge-call
              connection "api/request" params
@@ -221,10 +221,10 @@ No network request or subprocess is ever started by Elisp."
                      "tool_calls" kargu-stream-max-tool-calls
                      "argument_bytes" kargu-stream-max-tool-args-bytes)
            "timeouts" (kargu-bridge--object
-                       "connect_ms" (kargu-transport--milliseconds kargu-api-connect-timeout)
-                       "first_byte_ms" (kargu-transport--milliseconds kargu-api-first-byte-timeout)
-                       "idle_ms" (kargu-transport--milliseconds (and stream kargu-api-stall-timeout))
-                       "deadline_ms" (kargu-transport--milliseconds (if stream kargu-api-stream-ceiling timeout)))))
+                       "connect_ms" (kargu-transport-milliseconds kargu-api-connect-timeout)
+                       "first_byte_ms" (kargu-transport-milliseconds kargu-api-first-byte-timeout)
+                       "idle_ms" (kargu-transport-milliseconds (and stream kargu-api-stall-timeout))
+                       "deadline_ms" (kargu-transport-milliseconds (if stream kargu-api-stream-ceiling timeout)))))
          ;; Owner records/closures form cyclic graphs. Preserve their identity;
          ;; copy only DTO authority through the explicit encoders above.
          (delivery-options

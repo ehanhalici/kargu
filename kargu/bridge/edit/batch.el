@@ -150,7 +150,7 @@
       (when (stringp (plist-get copy key))
         (setf (plist-get copy key) (copy-sequence (plist-get copy key)))))
     (when (plist-get copy :scope)
-      (setf (plist-get copy :scope) (kargu-bridge-application--copy-scope (plist-get copy :scope))))
+      (setf (plist-get copy :scope) (kargu-bridge-application-copy-scope (plist-get copy :scope))))
     copy))
 
 (defun kargu-bridge-edit-batch-execute (spec &optional callback)

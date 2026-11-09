@@ -18,6 +18,7 @@
 (declare-function kargu-execution-app "kargu/application/execution" (context))
 
 (require 'rx)
+(require 'kargu/json)
 (defconst kargu-bridge-edit--text-bytes (* 4 1024 1024)
   "Maximum bytes in one native text part.")
 (defconst kargu-bridge-edit--upload-bytes (* 16 1024 1024)
@@ -70,7 +71,7 @@
     (kargu-bridge-call
      (kargu-bridge-edit-artifact-connection artifact)
      (or (alist-get method kargu-bridge-edit--methods) (error "Unknown edit method"))
-     (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope
+     (kargu-bridge--object "scope" (kargu-bridge-application-copy-scope
                                     (kargu-bridge-edit-artifact-scope artifact))
                            "arguments" arguments)
      (lambda (value failure)
@@ -237,7 +238,7 @@ any unrelated Elisp loop active when a delayed callback runs."
   "Begin TRANSFER on captured SCOPE, or report FAILURE."
   (if failure (kargu-bridge-edit--fail transfer failure)
     (let ((artifact (kargu-bridge-edit-transfer-artifact transfer)))
-      (setf (kargu-bridge-edit-artifact-scope artifact) (kargu-bridge-application--copy-scope scope))
+      (setf (kargu-bridge-edit-artifact-scope artifact) (kargu-bridge-application-copy-scope scope))
       (if (not (kargu-bridge-edit--live-p transfer))
           (kargu-bridge-edit--fail transfer (kargu-bridge--fault "stale_edit_preparation"))
         (condition-case nil
@@ -327,21 +328,16 @@ any unrelated Elisp loop active when a delayed callback runs."
             (unless (kargu-bridge-edit-transfer-handed transfer) (kargu-bridge-edit-release artifact))))
     transfer))
 
-(defun kargu-bridge-edit--copy (value)
-  "Detach bounded metadata VALUE from its caller before asynchronous dispatch."
-  (json-parse-string (json-serialize value :null-object :json-null :false-object :json-false)
-                     :object-type 'hash-table :null-object :json-null :false-object :json-false))
-
 (cl-defun kargu-bridge-edit--start (application arguments parts &key callback parent valid-p (action :prepare)
                                              connection scope scope-valid-p bound-callback)
   "Begin detached ARGUMENTS/PARTS for APPLICATION.
 CALLBACK, PARENT, VALID-P and ACTION control transfer lifetime.
 BOUND-CALLBACK observes the exact connection and scope before allocation."
-  (let* ((arguments (kargu-bridge-edit--copy arguments))
+  (let* ((arguments (kargu-json-detach arguments))
          (artifact (kargu-bridge-edit-artifact--make
                     :application application :origin (copy-sequence (gethash "origin_id" arguments))
                     :connection connection :epoch (and connection (copy-sequence (kargu-bridge-connection-epoch connection)))
-                    :scope (and scope (kargu-bridge-application--copy-scope scope))
+                    :scope (and scope (kargu-bridge-application-copy-scope scope))
                     :scope-valid-p scope-valid-p))
          (transfer (kargu-bridge-edit--transfer artifact callback :arguments arguments :parent parent :valid-p valid-p :action action :bound-callback bound-callback))
          (task (kargu-bridge-edit-transfer-task transfer)))
@@ -509,7 +505,7 @@ lifetime.  Failure revokes the preparation; text is never replayed implicitly."
   "Prepare APPLICATION rollback from detached ARGUMENTS into CALLBACK.
 PARENT owns preparation; BOUND-CALLBACK observes the exact connection and scope
 before dispatch.  No write capability is returned."
-  (let* ((arguments (kargu-bridge-edit--copy arguments))
+  (let* ((arguments (kargu-json-detach arguments))
          (task (kargu-async-start callback :timeout 30 :parent parent)))
     (cl-labels
         ((fail (failure) (kargu-async-finish task nil failure))
@@ -517,7 +513,7 @@ before dispatch.  No write capability is returned."
            (if failure (fail failure)
              (let ((artifact (kargu-bridge-edit-artifact--make
                               :application application :connection connection :epoch epoch
-                              :scope (kargu-bridge-application--copy-scope scope)
+                              :scope (kargu-bridge-application-copy-scope scope)
                               :origin (gethash "origin_id" arguments)
                               :id (gethash "preparation_id" value)
                               :descriptor (gethash "descriptor" value))))
@@ -537,7 +533,7 @@ before dispatch.  No write capability is returned."
                          (fail (kargu-bridge--fault "stale_edit_preparation"))
                        (kargu-bridge-call
                         connection "edit/rollback"
-                        (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope)
+                        (kargu-bridge--object "scope" (kargu-bridge-application-copy-scope scope)
                                               "arguments" arguments)
                         (lambda (value fault) (receive connection epoch scope value fault)))))
                  ((error quit) (fail (kargu-bridge--fault "stale_edit_preparation"))))))))

@@ -110,7 +110,7 @@ Return a detachable waiter cleanup, never admission or billing authority."
     (when start
       (setq binding (kargu-bridge-budget--make
                      :connection connection :budget budget
-                     :scope (kargu-bridge-application--copy-scope scope)))
+                     :scope (kargu-bridge-application-copy-scope scope)))
       (setf (kargu-run-budget-native budget) binding))
     (cond
      ((or (not (eq connection (kargu-bridge-budget-connection binding)))

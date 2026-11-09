@@ -106,7 +106,7 @@ Optionally retain NEXT."
         (progn
           (unless (and call (eq (kargu-bridge-sensor-call-state call) :prepared)
                        (kargu-bridge-sensor--live-p connection call params)
-                       (kargu-bridge-sensor--equal-p (gethash "resource" params) (kargu-bridge-sensor-call-resource call)))
+                       (kargu-json-equal (gethash "resource" params) (kargu-bridge-sensor-call-resource call)))
             (error "Unowned invocation"))
           (setf (kargu-bridge-sensor-call-state call) :issued
                 (kargu-bridge-sensor-call-reverse-id call) id)
@@ -149,7 +149,7 @@ Optionally retain NEXT."
           (unless (and call (eq (kargu-bridge-sensor-call-state call) :symbols-ready)
                        (equal (gethash "tool" params) "read_symbol")
                        (kargu-bridge-sensor--live-p connection call params)
-                       (kargu-bridge-sensor--equal-p (gethash "resource" params) (kargu-bridge-sensor-call-resource call)))
+                       (kargu-json-equal (gethash "resource" params) (kargu-bridge-sensor-call-resource call)))
             (error "Unowned symbol range"))
           (setf (kargu-bridge-sensor-call-state call) :issued
                 (kargu-bridge-sensor-call-reverse-id call) id)
@@ -177,7 +177,7 @@ Optionally retain NEXT."
          (original (and call (kargu-bridge-sensor-call-params call))))
     (when (and call (memq (kargu-bridge-sensor-call-state call) '(:prepared :symbols-ready))
                (eq (kargu-bridge-session-owned-entry connection params) (kargu-bridge-sensor-call-entry call))
-               (cl-every (lambda (key) (kargu-bridge-sensor--equal-p (gethash key params) (gethash key original)))
+               (cl-every (lambda (key) (kargu-json-equal (gethash key params) (gethash key original)))
                          '("request_id" "connection_epoch" "scope" "call_id")))
       (setf (kargu-bridge-sensor-call-state call) :settled)
       (kargu-bridge-sensor-symbols--forget connection call))))

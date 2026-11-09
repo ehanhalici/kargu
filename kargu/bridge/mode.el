@@ -59,7 +59,7 @@ CONNECTION and APPLICATION are the captured lease of SCOPE."
            (progn
              (when (equal (kargu-bridge-mode--status failure) "stale_revision")
                (kargu-bridge-call
-                connection "session/mode" (kargu-bridge-application--copy-scope scope)
+                connection "session/mode" (kargu-bridge-application-copy-scope scope)
                 (lambda (current error-data)
                   (unless error-data
                     (ignore-errors

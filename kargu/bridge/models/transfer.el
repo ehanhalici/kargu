@@ -19,7 +19,7 @@
   (let ((service (kargu-bridge-model-ticket-service ticket)) delivered)
     (kargu-bridge-call
      (kargu-bridge-models-connection service) method
-     (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope
+     (kargu-bridge--object "scope" (kargu-bridge-application-copy-scope
                                     (kargu-bridge-models-scope service))
                            "arguments" arguments)
      (lambda (result failure)

@@ -113,7 +113,7 @@ OBSERVE reads the initial/current head without a metadata mutation."
                                               :app application :connection connection)) application))
          (ticket (kargu-bridge-model-ticket--make
                   :service service :provider (copy-sequence provider) :source (copy-sequence source)
-                  :specs (kargu-bridge-models--copy specs) :callback callback :owner owner :valid-p valid-p
+                  :specs (kargu-bridge-models-copy specs) :callback callback :owner owner :valid-p valid-p
                   :bytes (string-bytes source) :reconcile reconcile :observe observe))
          (failure (cond
                    ((and connection (not (eq connection (kargu-bridge-models-connection service))))
@@ -169,7 +169,7 @@ uncertain commit.  It never issues a metadata update or replaces a lost lease."
   "Return APPLICATION's detached last committed view without IO or core startup."
   (when-let* ((service (gethash :native-models (kargu-application-services application)))
               ((kargu-bridge-models--current-p service)))
-    (kargu-bridge-models--copy (kargu-bridge-models--view service))))
+    (kargu-bridge-models-copy (kargu-bridge-models--view service))))
 
 (defun kargu-bridge-models-reconcile (application callback)
   "Explicitly repair APPLICATION's view on its existing native lease.
@@ -199,7 +199,7 @@ Return a detachable waiter cleanup; it does not cancel a shared publication."
        (if (kargu-bridge-models--current-p (kargu-bridge-model-ticket-service ticket))
            (kargu-bridge--callback callback (kargu-bridge-model-ticket-view ticket) nil)
          (kargu-bridge--callback callback nil (kargu-bridge--fault "metadata_epoch_lost"))))
-      (_ (kargu-bridge--callback callback nil (kargu-bridge-models--copy
+      (_ (kargu-bridge--callback callback nil (kargu-bridge-models-copy
                                                (kargu-bridge-model-ticket-failure ticket)))))
     (lambda ()
       (setcar waiter nil)

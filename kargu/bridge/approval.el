@@ -13,12 +13,7 @@
 (require 'kargu/bridge)
 (require 'kargu/confirm)
 (require 'kargu/core/session)
-
-(defun kargu-bridge-approval--copy (value)
-  "Capture JSON VALUE without sharing mutable containers with its caller."
-  (json-parse-string (json-serialize value :null-object :json-null :false-object :json-false)
-                     :object-type 'hash-table :array-type 'array
-                     :null-object :json-null :false-object :json-false))
+(require 'kargu/json)
 
 (cl-defun kargu-bridge-approval-execute
     (connection arguments callback &key owner (method "tool/execute")
@@ -30,7 +25,7 @@
                     (member "process_idle_timeout" (append (kargu-bridge-connection-capabilities connection) nil)))
                 (hash-table-p (kargu-bridge-connection-read-scope connection))))
       (progn (kargu-bridge--callback callback nil (kargu-bridge--fault "unavailable" "Required native command capability unavailable; rebuild kargu-core")) nil)
-    (let* ((captured (kargu-bridge-approval--copy arguments))
+    (let* ((captured (kargu-json-detach arguments))
            (timeout (gethash "timeout_ms" captured))
            (session (kargu-session-context owner))
            (parent kargu-async--current-task)
@@ -46,19 +41,8 @@
       id)))
 
 (defun kargu-bridge-approval--equal-map (left right)
-  "Whether LEFT and RIGHT have exactly the same string keys and values."
-  (and (hash-table-p left) (hash-table-p right)
-       (= (hash-table-count left) (hash-table-count right))
-       (let ((same t))
-         (maphash (lambda (key value) (unless (kargu-bridge-approval--equal-value value (gethash key right :missing)) (setq same nil))) left)
-         same)))
-
-(defun kargu-bridge-approval--equal-value (left right)
-  "Compare bounded wire LEFT and RIGHT values without object identity."
-  (cond ((hash-table-p left) (kargu-bridge-approval--equal-map left right))
-        ((vectorp left) (and (vectorp right) (= (length left) (length right))
-                            (cl-every #'kargu-bridge-approval--equal-value left right)))
-        (t (equal left right))))
+  "Whether LEFT and RIGHT are objects with exactly the same keys and values."
+  (and (hash-table-p left) (kargu-json-equal left right)))
 
 (defun kargu-bridge-approval--git-intent-p (connection params args)
   "Check native Git PARAMS against captured ARGS on CONNECTION."

@@ -118,23 +118,23 @@
   (remove-hook 'eglot-managed-mode-hook #'kargu-lsp--forget-publication)
   nil)
 
-(defun kargu-lsp--diagnostic-backends ()
+(defun kargu-lsp-diagnostic-backends ()
   "Return the effective Flymake backend functions in this buffer."
   (let (backends)
     (run-hook-wrapped 'flymake-diagnostic-functions
                       (lambda (backend) (push backend backends) nil))
     (nreverse backends)))
 
-(defun kargu-lsp--diagnostic-backends-match-p (expected)
+(defun kargu-lsp-diagnostic-backends-match-p (expected)
   "Return non-nil when current backend identities match EXPECTED."
-  (let ((actual (kargu-lsp--diagnostic-backends)))
+  (let ((actual (kargu-lsp-diagnostic-backends)))
     (and (= (length actual) (length expected))
          (cl-every #'eq actual expected))))
 
 (defun kargu-lsp--start-buffer-diagnostic-barrier ()
   "Capture this buffer's version and start its configured backend generation."
   (let* ((server (and (bound-and-true-p eglot--managed-mode) (eglot-current-server)))
-         (backends (kargu-lsp--diagnostic-backends)))
+         (backends (kargu-lsp-diagnostic-backends)))
     (when server (eglot--signal-textDocument/didChange))
     (let ((barrier
            (kargu-lsp--make-diagnostic-barrier
@@ -173,7 +173,7 @@ No file is opened, checker enabled or disabled backend forced."
            (= (buffer-chars-modified-tick) (kargu-lsp-diagnostic-barrier-tick barrier))
            (eq (and (bound-and-true-p eglot--managed-mode) (eglot-current-server))
                (kargu-lsp-diagnostic-barrier-server barrier))
-           (kargu-lsp--diagnostic-backends-match-p
+           (kargu-lsp-diagnostic-backends-match-p
             (kargu-lsp-diagnostic-barrier-backends barrier))
            (cl-every (lambda (backend report)
                        (and report kargu-lsp--backend-reports
@@ -208,7 +208,7 @@ No file is opened, checker enabled or disabled backend forced."
 Observe existing evidence without starting a backend or waiting for I/O."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (let* ((backends (kargu-lsp--diagnostic-backends))
+      (let* ((backends (kargu-lsp-diagnostic-backends))
              (server (and (bound-and-true-p eglot--managed-mode)
                           (eglot-current-server)))
              (barrier (kargu-lsp--make-diagnostic-barrier

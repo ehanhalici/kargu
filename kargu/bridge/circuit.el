@@ -63,7 +63,7 @@ CURRENT marks its last used provider circuit, not an admission decision."
     (unless (and (eq connection (kargu-bridge-circuits-connection service))
                  (kargu-bridge-application-scope-equal-p scope (kargu-bridge-circuits-scope service)))
       (setf (kargu-bridge-circuits-connection service) connection
-            (kargu-bridge-circuits-scope service) (kargu-bridge-application--copy-scope scope)
+            (kargu-bridge-circuits-scope service) (kargu-bridge-application-copy-scope scope)
             (kargu-bridge-circuits-sequence service) 0
             (kargu-bridge-circuits-order service) nil)
       (clrhash (kargu-bridge-circuits-views service))
@@ -96,7 +96,7 @@ CALLBACK receives native result/error.  Never start or reconnect a core."
          (scope (and service (kargu-bridge-circuits-scope service))))
     (if (not (and service (kargu-bridge-circuit-current-p application connection scope)))
         (kargu-bridge--callback callback nil (kargu-bridge--fault "unavailable"))
-      (let ((params (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope))))
+      (let ((params (kargu-bridge--object "scope" (kargu-bridge-application-copy-scope scope))))
         (when provider (puthash "provider" (copy-sequence provider) params))
         (kargu-bridge-call
          connection "api/circuit/reset" params

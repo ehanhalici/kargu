@@ -81,7 +81,7 @@ CONNECTION and APPLICATION are the captured lease of SCOPE."
              ;; A stale revision is refreshed for the next intent, never replayed.
              (when (equal (kargu-bridge-selection--status failure) "stale_revision")
                (kargu-bridge-call
-                connection "session/selection" (kargu-bridge-application--copy-scope scope)
+                connection "session/selection" (kargu-bridge-application-copy-scope scope)
                 (lambda (current error-data)
                   (unless error-data
                     (ignore-errors

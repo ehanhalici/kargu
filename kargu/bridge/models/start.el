@@ -54,7 +54,7 @@
              (if failure
                  (progn (setf (kargu-bridge-models-fault service) failure)
                         (kargu-bridge-models--complete ticket nil failure))
-               (setf (kargu-bridge-models-scope service) (kargu-bridge-application--copy-scope scope))
+               (setf (kargu-bridge-models-scope service) (kargu-bridge-application-copy-scope scope))
                (kargu-bridge-models--ready ticket))))))))))
 
 (defun kargu-bridge-models--ready (ticket)

@@ -35,21 +35,21 @@
 
 (defun kargu-bridge-model-ticket-view (ticket)
   "Return a detached committed TICKET receipt, never its mutable cache storage."
-  (kargu-bridge-models--copy (get (kargu-bridge-model-ticket-view-cell ticket) 'value)))
+  (kargu-bridge-models-copy (get (kargu-bridge-model-ticket-view-cell ticket) 'value)))
 
-(defun kargu-bridge-models--copy (value)
+(defun kargu-bridge-models-copy (value)
   "Detach JSON VALUE, including strings and nested mutable containers."
   (cond
    ((stringp value) (copy-sequence value))
    ((hash-table-p value)
     (let ((copy (make-hash-table :test #'equal)))
       (maphash (lambda (key item)
-                 (puthash (kargu-bridge-models--copy key)
-                          (kargu-bridge-models--copy item) copy)) value)
+                 (puthash (kargu-bridge-models-copy key)
+                          (kargu-bridge-models-copy item) copy)) value)
       copy))
-   ((vectorp value) (vconcat (mapcar #'kargu-bridge-models--copy value)))
-   ((consp value) (cons (kargu-bridge-models--copy (car value))
-			(kargu-bridge-models--copy (cdr value))))
+   ((vectorp value) (vconcat (mapcar #'kargu-bridge-models-copy value)))
+   ((consp value) (cons (kargu-bridge-models-copy (car value))
+			(kargu-bridge-models-copy (cdr value))))
    (t value)))
 
 (defun kargu-bridge-models--current-p (service)
@@ -92,8 +92,8 @@
       (let ((function (car waiter)))
         (setcar waiter nil)
         (when function
-          (kargu-bridge--callback function (and value (kargu-bridge-models--copy value))
-                                  (and failure (kargu-bridge-models--copy failure))))))))
+          (kargu-bridge--callback function (and value (kargu-bridge-models-copy value))
+                                  (and failure (kargu-bridge-models-copy failure))))))))
 
 (provide 'kargu/bridge/models/state)
 ;;; state.el ends here

@@ -44,7 +44,7 @@ CALLBACK receives (VIEW FAILURE) once.  OWNER and VALID-P guard the producer."
     (when-let* ((entry (kargu-model-projection--entry
                         (kargu-model-projection--view) (kargu-model-store--provider provider)
                         (string-trim id) exact)))
-      (kargu-json-to-record (kargu-bridge-models--copy (gethash "metadata" entry))))))
+      (kargu-json-to-record (kargu-bridge-models-copy (gethash "metadata" entry))))))
 
 (defun kargu-model-store-settings (provider id &optional view omit-metadata)
   "Detach PROVIDER/ID's fields from immutable VIEW or its UI observation.

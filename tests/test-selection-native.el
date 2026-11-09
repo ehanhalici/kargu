@@ -45,7 +45,7 @@
          (connection (kargu-bridge-conversation-connection binding))
          (reply (kargu-bridge-test--call
                  connection "session/selection"
-                 (kargu-bridge-application--copy-scope (kargu-bridge-conversation-scope binding)))))
+                 (kargu-bridge-application-copy-scope (kargu-bridge-conversation-scope binding)))))
     (should-not (cadr reply))
     (car reply)))
 

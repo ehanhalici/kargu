@@ -308,7 +308,7 @@ and a second edit before consumption preserves the pre-first-edit baseline."
       (unwind-protect
           (cl-letf (((symbol-function 'kargu-lsp-current-diagnostics-p) (lambda (_) t))
                     ((symbol-function 'kargu-lsp-diagnostics-snapshot) (lambda (_) diags))
-                    ((symbol-function 'kargu-lsp--diagnostic-backends) (lambda () '(elisp-flymake)))
+                    ((symbol-function 'kargu-lsp-diagnostic-backends) (lambda () '(elisp-flymake)))
                     ((symbol-function 'eglot-current-server)
                      (lambda () (and (bound-and-true-p eglot--managed-mode) curr-server)))
                     ((symbol-function 'jsonrpc--process) (lambda (_) curr-proc)))

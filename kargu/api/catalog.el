@@ -202,7 +202,7 @@ The native catalog's IDs become the UI cache only after committed completion."
        (unless failure
          (let ((catalog (cl-find-if (lambda (entry) (equal (gethash "provider" entry) provider))
                                     (gethash "catalogs" view))))
-           (puthash provider (append (kargu-bridge-models--copy (gethash "models" catalog)) nil)
+           (puthash provider (append (kargu-bridge-models-copy (gethash "models" catalog)) nil)
                     (kargu-metadata-table :catalog kargu--live-models-cache))))
        (when callback (funcall callback view failure)))
      :valid-p valid-p)))

@@ -188,14 +188,14 @@
 (ert-deftest kargu-config-policy-application-url-is-frozen-publication-metadata-test ()
   "Application URL metadata is detached and omitted from live source DTOs."
   (let* ((kargu-app-url (copy-sequence "https://captured.invalid/"))
-         (inputs (kargu-bridge-config-policy--inputs)))
+         (inputs (kargu-bridge-config-policy-inputs)))
     (unwind-protect
         (progn
           (clear-string kargu-app-url)
-          (should (equal (gethash "app_url" (kargu-bridge-config-policy--captured-context inputs [] t))
+          (should (equal (gethash "app_url" (kargu-bridge-config-policy-captured-context inputs [] t))
                          "https://captured.invalid/"))
-          (should-not (gethash "app_url" (kargu-bridge-config-policy--captured-context inputs []))))
-      (kargu-bridge-config-policy--release-inputs inputs))))
+          (should-not (gethash "app_url" (kargu-bridge-config-policy-captured-context inputs []))))
+      (kargu-bridge-config-policy-release-inputs inputs))))
 
 (provide 'tests/test-config-policy)
 ;;; test-config-policy.el ends here

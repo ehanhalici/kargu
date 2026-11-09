@@ -39,7 +39,7 @@
     (list (file-truename directory) (file-attribute-inode-number attributes)
           (file-attribute-device-number attributes))))
 
-(defun kargu-permission--operation-valid-p (operation)
+(defun kargu-permission-operation-valid-p (operation)
   "Return non-nil while OPERATION's captured authority is unchanged."
   (let ((origin (kargu-permission-operation-origin operation)))
     (and (buffer-live-p origin)
@@ -128,7 +128,7 @@ Return a task; cancellation or owner replacement suppresses stale effects."
          (task (kargu-async-start
                 (lambda (value error)
                   (funcall callback (if error (concat "ERROR: " error) value)))
-                :valid-p (lambda () (kargu-permission--operation-valid-p operation)))))
+                :valid-p (lambda () (kargu-permission-operation-valid-p operation)))))
     (setf (kargu-permission-operation-task operation) task)
     (funcall (kargu-async-wrap task (lambda () (kargu-permission--request-operation operation))))
     task))
