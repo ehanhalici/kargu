@@ -5031,7 +5031,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kutuyu kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya
       sahipliğini atamaya ekle.
 
-    - [ ] **7.5a Gerçek RPC entegrasyonu:** save/list/load/delete/import için
+    - [x] **7.5a Gerçek RPC entegrasyonu:** save/list/load/delete/import için
       zorunlu application/session/storage scope, expected revision ve cancel/
       deadline; constants veya bridge stub'ı backend varlığı sayılmaz. Arbitrary
       path/root parametresi tek başına dosya erişim yetkisi vermesin.
@@ -5057,6 +5057,26 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         değildir.
 
       **Denetim (2026-11-09) — yeniden açıldı:** Gerçek pipe CRUD var. Açık kalan: `storage_root` istemciden gelen keyfi mutlak yol ve tek başına yazma yetkisi veriyor (ölçüt: arbitrary root yetki vermesin); kök Rust config/policy'den türetilmeli. Ayrıca record'u Elisp history'den kuruyor (native history snapshot değil). Düzeltilen: kayıtsız save boş "Untitled" kayıtla oturumun üzerine yazıyordu, artık ret; record artık sınırlı/şemalı `SessionRecord::try_from`'dan geçiyor; Elisp her save'de `expected_revision 0` gönderiyordu (iyimser eşzamanlılık kapalıydı), artık son onaylı revision gönderiliyor.
+
+      **Kapanış (2026-11-09):** İstek artık dizin adlandırmıyor. `storage_root` alanı
+        kaldırıldı (bilinmeyen alan → `invalid_params`); yerine typed `storage`
+        seçimi geliyor: `location` (`central`/`project`), `project_root` ve ham editör
+        olguları (`xdg_data_home`, `user_emacs_directory`; kullanıcı özelleştirdiyse
+        açık grant olarak `sessions_directory`). Dizini saf
+        `persistence/layout.rs` türetir: `<proje>/.kargu/sessions`,
+        `<data>/kargu/sessions/<ad>-<sha1[..8]>` veya `<grant>/<anahtar>`. Anahtar
+        eski Elisp slug'ıyla birebir aynı, mevcut oturumlar bulunur. Canonicalize ve
+        link reddi worker'da çalışan shell `storage::resolve_location` içinde;
+        actor disk beklemez. Editörün adlandırmadığı her bileşen symlink/dosya ise
+        ret. Eskiden keyfi bir kök verilince `validate_or_create_dir` var olan bir
+        kullanıcı dizinini `chmod 0700` yapabiliyordu; artık yalnız Kargu'ya ait
+        leaf dizinlere dokunuluyor. Import `collision "replace"` gönderiyordu, core
+        bunu tanımadığı için import hep `invalid_params` alıyordu; `override`'a
+        düzeltildi. Kanıt: `persistence_stdio`
+        `storage_directory_is_derived_natively_never_named_by_the_request`, layout
+        unit testleri (legacy slug eşliği, link reddi, grant), ERT
+        `kargu-session-native-storage-names-a-choice-not-a-directory-test`. Kayıt
+        içeriğinin native history'den gelmesi 7.5c'ye taşındı.
 
     - [x] **7.5b Atomik restore:** history/selection/accounting/context root'u
       candidate olarak doğrula; aktif run varken ret veya açık transition uygula.
@@ -5106,7 +5126,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-      **Denetim (2026-11-09) — yeniden açıldı:** Auto-save debounce, storage dizini politikası ve `kargu-session-list` (eski `kargu-session-storage-list-metadata`) hâlâ Elisp'te; ölçüt bunların Rust'ta olmasını istiyor.
+      **Denetim (2026-11-09) — yeniden açıldı:** Auto-save debounce, storage dizini politikası ve `kargu-session-list` (eski `kargu-session-storage-list-metadata`) hâlâ Elisp'te; ölçüt bunların Rust'ta olmasını istiyor. 7.5a sonrası: dizin türetme Rust'ta. Hâlâ açık: save record'u Elisp history/transcript'ten kuruluyor (native history snapshot değil); delete, bridge yoksa yerel `delete-file`'a düşüyor (ikinci writer); import kaynak dosyayı Elisp okuyor.
 
     - [x] **7.5d Fixture kabulü:** gerçek geçici disk + pipe'ta CRUD/import/restart,
       iki owner, stale revision, reply kaybı ve UI origin close'u çalıştır;

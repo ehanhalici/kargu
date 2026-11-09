@@ -249,7 +249,7 @@ Native persistence owns the write; there is no local synchronous fallback."
                    (let ((params (kargu-bridge--object
                                   "scope" scope
                                   "session_id" sid
-                                  "storage_root" (directory-file-name (kargu-session-storage-directory root))
+                                  "storage" (kargu-session--native-storage root)
                                   "expected_revision" expected
                                   "record" data)))
                      (kargu-bridge-session-save
@@ -268,6 +268,31 @@ Native persistence owns the write; there is no local synchronous fallback."
                           (when callback (funcall callback result nil))))
                       buf)))
                 (kargu-session-storage-file sid root))))))))))
+
+(defun kargu-session--customized-directory ()
+  "Return `kargu-sessions-directory' only when the user changed it."
+  (let ((standard (car (get 'kargu-sessions-directory 'standard-value))))
+    (unless (and standard
+                 (equal (expand-file-name kargu-sessions-directory)
+                        (expand-file-name (eval standard t))))
+      (directory-file-name (expand-file-name kargu-sessions-directory)))))
+
+(defun kargu-session--native-storage (root)
+  "Return the native storage choice for project ROOT.
+Only the location choice, raw editor facts and an explicitly customized
+central directory are sent; Rust derives the session directory and its
+project key, so no request names the directory it writes."
+  (let ((central (eq kargu-session-storage-location 'central)))
+    (kargu-bridge--object
+     "location" (pcase kargu-session-storage-location
+                  ('central "central")
+                  ('project "project")
+                  (_ (user-error "Kargu: invalid session storage location")))
+     "project_root" (directory-file-name (expand-file-name root))
+     "xdg_data_home" (or (getenv "XDG_DATA_HOME") :json-null)
+     "user_emacs_directory" (expand-file-name user-emacs-directory)
+     "sessions_directory" (or (and central (kargu-session--customized-directory))
+                              :json-null))))
 
 (defun kargu-session-list (&optional root)
   "Return list of saved session metadata alists for project ROOT, newest first."
@@ -326,7 +351,7 @@ session, project root and listing generation."
             (t
              (let ((params (kargu-bridge--object
                             "scope" scope
-                            "storage_root" (directory-file-name (kargu-session-storage-directory canonical)))))
+                            "storage" (kargu-session--native-storage canonical))))
                (kargu-bridge-session-list
                 connection params
                 (lambda (reply error-data)
@@ -421,7 +446,7 @@ Return the buffer on immediate success, or an owned task while preparing."
              (let ((params (kargu-bridge--object
                             "scope" scope
                             "session_id" session-id
-                            "storage_root" (directory-file-name (kargu-session-storage-directory canonical)))))
+                            "storage" (kargu-session--native-storage canonical))))
                (kargu-bridge-session-delete
                 connection params
                 (lambda (result err)
@@ -517,9 +542,9 @@ current chat's project, not any project named by session metadata."
          (let ((params (kargu-bridge--object
                         "scope" scope
                         "session_id" session-id
-                        "storage_root" (directory-file-name (kargu-session-storage-directory proj-root))
+                        "storage" (kargu-session--native-storage proj-root)
                         "source_payload" payload
-                        "collision" "replace")))
+                        "collision" "override")))
            (kargu-bridge-session-import
             connection params
             (lambda (result err)

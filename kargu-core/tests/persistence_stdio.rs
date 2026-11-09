@@ -6,6 +6,11 @@ use support::Peer;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+/// Project-local storage choice; the core derives `<root>/.kargu/sessions`.
+fn project_storage(project_root: &str) -> serde_json::Value {
+    json!({"location": "project", "project_root": project_root})
+}
+
 #[test]
 fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
     let storage_dir = tempfile::tempdir()?;
@@ -36,7 +41,7 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
         "method": "session/save",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1,
             "record": save_record
         }
@@ -49,7 +54,10 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
     assert_eq!(save_reply["result"]["revision"], 1);
 
     // Verify snapshot file exists on disk
-    let file_path = storage_dir.path().join(format!("{session_id}.json"));
+    let file_path = storage_dir
+        .path()
+        .join(".kargu/sessions")
+        .join(format!("{session_id}.json"));
     assert!(file_path.exists());
 
     // 2. session/load with matching revision
@@ -59,7 +67,7 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
         "method": "session/load",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1
         }
     }))?;
@@ -78,7 +86,7 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
         "method": "session/load",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 999
         }
     }))?;
@@ -95,7 +103,7 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
         "method": "session/list",
         "params": {
             "scope": scope,
-            "storage_root": storage_path
+            "storage": project_storage(storage_path)
         }
     }))?;
 
@@ -115,7 +123,7 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
         "method": "session/delete",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1
         }
     }))?;
@@ -132,7 +140,7 @@ fn session_save_load_list_delete_roundtrip_over_pipe() -> TestResult {
         "method": "session/load",
         "params": {
             "scope": scope,
-            "storage_root": storage_path
+            "storage": project_storage(storage_path)
         }
     }))?;
 
@@ -161,7 +169,7 @@ fn session_import_and_collision_policy_over_pipe() -> TestResult {
         "method": "session/import",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "source_payload": fixture,
             "collision": "reject"
         }
@@ -179,7 +187,7 @@ fn session_import_and_collision_policy_over_pipe() -> TestResult {
         "method": "session/import",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "source_payload": fixture,
             "collision": "reject"
         }
@@ -217,7 +225,7 @@ fn foreign_or_missing_scope_rejected_before_disk_access() -> TestResult {
         "method": "session/save",
         "params": {
             "scope": foreign_scope,
-            "storage_root": target_str,
+            "storage": project_storage(target_str),
             "expected_revision": 1,
             "record": {"schema_version": 2, "id": "sess_00000000-0000-4000-8000-000000000099", "messages": []}
         }
@@ -239,7 +247,7 @@ fn foreign_or_missing_scope_rejected_before_disk_access() -> TestResult {
         "method": "session/save",
         "params": {
             "scope": real_scope,
-            "storage_root": "relative/path/not/allowed",
+            "storage": project_storage("relative/path/not/allowed"),
             "expected_revision": 1,
             "record": {"schema_version": 2, "id": real_session, "messages": []}
         }
@@ -477,7 +485,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "params": {
             "scope": scope1,
             "session_id": sess_id1,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1,
             "record": rec1
         }
@@ -486,7 +494,10 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
     assert_eq!(save1["id"], 60);
     assert_eq!(save1["result"]["status"], "ok");
 
-    let file_path1 = storage_dir.path().join(format!("{sess_id1}.json"));
+    let file_path1 = storage_dir
+        .path()
+        .join(".kargu/sessions")
+        .join(format!("{sess_id1}.json"));
     assert!(file_path1.exists());
 
     // 2. Peer 2 (second distinct owner) cannot corrupt or delete with stale revision
@@ -502,7 +513,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "params": {
             "scope": scope2,
             "session_id": sess_id1,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 999
         }
     }))?;
@@ -529,7 +540,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "params": {
             "scope": scope2,
             "session_id": sess_id1,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 999,
             "record": rec_hijack
         }
@@ -554,7 +565,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "method": "session/list",
         "params": {
             "scope": scope3,
-            "storage_root": storage_path
+            "storage": project_storage(storage_path)
         }
     }))?;
     let list3 = peer3.read()?;
@@ -573,7 +584,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "params": {
             "scope": scope3,
             "session_id": sess_id1,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1
         }
     }))?;
@@ -593,7 +604,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "method": "session/import",
         "params": {
             "scope": scope3,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "source_payload": v2_fixture,
             "collision": "reject"
         }
@@ -610,7 +621,7 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
         "params": {
             "scope": scope3,
             "session_id": sess_id1,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1
         }
     }))?;
@@ -620,7 +631,10 @@ fn fixture_acceptance_two_owners_stale_revision_restart_and_close() -> TestResul
     assert!(!file_path1.exists());
 
     // Imported fixture still exists
-    let imported_file = storage_dir.path().join("migration-v2.json");
+    let imported_file = storage_dir
+        .path()
+        .join(".kargu/sessions")
+        .join("migration-v2.json");
     assert!(imported_file.exists());
 
     Ok(())
@@ -650,7 +664,7 @@ fn session_retention_and_prune_over_pipe() -> TestResult {
             "params": {
                 "scope": scope,
                 "session_id": sid,
-                "storage_root": storage_path,
+                "storage": project_storage(storage_path),
                 "expected_revision": 1,
                 "record": rec
             }
@@ -661,7 +675,10 @@ fn session_retention_and_prune_over_pipe() -> TestResult {
     }
 
     // Create orphaned temp file
-    let tmp_file = storage_dir.path().join(".tmp.orphaned_write");
+    let tmp_file = storage_dir
+        .path()
+        .join(".kargu/sessions")
+        .join(".tmp.orphaned_write");
     std::fs::write(&tmp_file, b"stray uncommitted bytes")?;
     assert!(tmp_file.exists());
 
@@ -672,7 +689,7 @@ fn session_retention_and_prune_over_pipe() -> TestResult {
         "method": "session/prune",
         "params": {
             "scope": scope,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "max_count": 2,
             "active_sessions": ["sess_a"]
         }
@@ -685,11 +702,29 @@ fn session_retention_and_prune_over_pipe() -> TestResult {
     assert_eq!(prune_reply["result"]["retained_count"], 2);
 
     // sess_a was protected as active
-    assert!(storage_dir.path().join("sess_a.json").exists());
+    assert!(
+        storage_dir
+            .path()
+            .join(".kargu/sessions")
+            .join("sess_a.json")
+            .exists()
+    );
     // sess_b was the oldest inactive, so it was pruned
-    assert!(!storage_dir.path().join("sess_b.json").exists());
+    assert!(
+        !storage_dir
+            .path()
+            .join(".kargu/sessions")
+            .join("sess_b.json")
+            .exists()
+    );
     // sess_c was retained
-    assert!(storage_dir.path().join("sess_c.json").exists());
+    assert!(
+        storage_dir
+            .path()
+            .join(".kargu/sessions")
+            .join("sess_c.json")
+            .exists()
+    );
     // Orphaned temp file was cleaned
     assert!(!tmp_file.exists());
 
@@ -721,14 +756,17 @@ fn session_delete_recreate_stale_callback_race_over_pipe() -> TestResult {
         "params": {
             "scope": scope,
             "session_id": sid,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1,
             "record": rec1
         }
     }))?;
     let r1 = peer.read()?;
     assert_eq!(r1["result"]["status"], "ok");
-    let file_path = storage_dir.path().join(format!("{sid}.json"));
+    let file_path = storage_dir
+        .path()
+        .join(".kargu/sessions")
+        .join(format!("{sid}.json"));
     assert!(file_path.exists());
 
     // 2. Delete session with expected_revision: 1
@@ -739,7 +777,7 @@ fn session_delete_recreate_stale_callback_race_over_pipe() -> TestResult {
         "params": {
             "scope": scope,
             "session_id": sid,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1
         }
     }))?;
@@ -762,7 +800,7 @@ fn session_delete_recreate_stale_callback_race_over_pipe() -> TestResult {
         "params": {
             "scope": scope,
             "session_id": sid,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 2,
             "record": stale_rec
         }
@@ -789,7 +827,7 @@ fn session_delete_recreate_stale_callback_race_over_pipe() -> TestResult {
         "params": {
             "scope": scope,
             "session_id": sid,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1,
             "record": rec_fresh
         }
@@ -806,7 +844,7 @@ fn session_delete_recreate_stale_callback_race_over_pipe() -> TestResult {
         "params": {
             "scope": scope,
             "session_id": sid,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 999,
             "record": stale_rec
         }
@@ -822,7 +860,7 @@ fn session_delete_recreate_stale_callback_race_over_pipe() -> TestResult {
         "params": {
             "scope": scope,
             "session_id": sid,
-            "storage_root": storage_path,
+            "storage": project_storage(storage_path),
             "expected_revision": 1
         }
     }))?;
@@ -844,11 +882,65 @@ fn save_without_a_record_is_rejected_and_never_writes_a_blank_session() -> TestR
         "jsonrpc": "2.0",
         "id": 40,
         "method": "session/save",
-        "params": {"scope": scope, "storage_root": root_str, "expected_revision": 0}
+        "params": {"scope": scope, "storage": project_storage(root_str), "expected_revision": 0}
     }))?;
     let reply = peer.read()?;
     assert_eq!(reply["id"], 40);
     assert_eq!(reply["error"]["data"]["status"], "invalid_params");
     assert!(!root.exists());
+    Ok(())
+}
+
+#[test]
+fn storage_directory_is_derived_natively_never_named_by_the_request() -> TestResult {
+    let project = tempfile::tempdir()?;
+    let data = tempfile::tempdir()?;
+    let arbitrary = tempfile::tempdir()?;
+    let project_str = project.path().to_str().ok_or("invalid path")?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let sid = scope["session_id"].as_str().ok_or("session_id")?.to_owned();
+    let record = json!({"schema_version": 2, "id": sid, "revision": 1, "messages": []});
+
+    // A raw directory is not a storage grant: the field is unknown and rejected.
+    peer.send(json!({
+        "jsonrpc": "2.0", "id": 50, "method": "session/save",
+        "params": {"scope": scope, "storage_root": arbitrary.path(),
+                   "expected_revision": 0, "record": record}
+    }))?;
+    let reply = peer.read()?;
+    assert_eq!(reply["error"]["data"]["status"], "invalid_params");
+    assert_eq!(std::fs::read_dir(arbitrary.path())?.count(), 0);
+
+    // Central layout: <data>/kargu/sessions/<name>-<sha1[..8]>/<sid>.json
+    peer.send(json!({
+        "jsonrpc": "2.0", "id": 51, "method": "session/save",
+        "params": {"scope": scope, "expected_revision": 0, "record": record,
+                   "storage": {"location": "central", "project_root": project_str,
+                               "xdg_data_home": data.path()}}
+    }))?;
+    let reply = peer.read()?;
+    assert_eq!(reply["result"]["revision"], 1);
+    let sessions = data.path().join("kargu/sessions");
+    let keyed: Vec<_> = std::fs::read_dir(&sessions)?.collect::<Result<_, _>>()?;
+    assert_eq!(keyed.len(), 1);
+    assert!(keyed[0].path().join(format!("{sid}.json")).is_file());
+    assert!(!project.path().join(".kargu").exists());
+
+    // Project layout: <project>/.kargu/sessions/<sid>.json
+    peer.send(json!({
+        "jsonrpc": "2.0", "id": 52, "method": "session/save",
+        "params": {"scope": scope, "expected_revision": 0, "record": record,
+                   "storage": project_storage(project_str)}
+    }))?;
+    let reply = peer.read()?;
+    assert_eq!(reply["result"]["revision"], 1);
+    assert!(
+        project
+            .path()
+            .join(format!(".kargu/sessions/{sid}.json"))
+            .is_file()
+    );
     Ok(())
 }

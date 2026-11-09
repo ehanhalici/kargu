@@ -12,10 +12,11 @@ use crate::{
     persistence::{
         domain::{
             ListTruncation, PersistenceError, RetentionReport, SessionListResult, SessionRecord,
-            SessionRetentionPolicy, StorageRevision, StorageRoot, StorageSessionId,
+            SessionRetentionPolicy, StorageRevision, StorageSessionId,
         },
+        layout::StorageLocation,
         migration::SessionCandidate,
-        storage::{SessionLock, SessionStorage},
+        storage::{SessionLock, SessionStorage, resolve_location},
     },
 };
 use std::{
@@ -526,21 +527,21 @@ fn check_expected_revision(
 /// Target session and storage directory for a persistence operation.
 #[derive(Clone, Debug)]
 pub struct PersistenceTarget {
-    storage_root: StorageRoot,
+    storage_root: StorageLocation,
     session_id: StorageSessionId,
 }
 
 impl PersistenceTarget {
     /// Create a new persistence target descriptor.
-    pub fn new(storage_root: StorageRoot, session_id: StorageSessionId) -> Self {
+    pub fn new(storage_root: StorageLocation, session_id: StorageSessionId) -> Self {
         Self {
             storage_root,
             session_id,
         }
     }
 
-    /// Access storage root.
-    pub fn storage_root(&self) -> &StorageRoot {
+    /// Access the storage location.
+    pub fn storage_root(&self) -> &StorageLocation {
         &self.storage_root
     }
 
@@ -583,7 +584,7 @@ impl SaveTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        let storage = SessionStorage::new(self.target.storage_root)?;
+        let storage = SessionStorage::new(resolve_location(&self.target.storage_root)?)?;
         let lock = storage.lock(&self.target.session_id)?;
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
@@ -628,7 +629,7 @@ impl LoadTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        let storage = SessionStorage::new(self.target.storage_root)?;
+        let storage = SessionStorage::new(resolve_location(&self.target.storage_root)?)?;
         let lock = storage.lock(&self.target.session_id)?;
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
@@ -652,12 +653,12 @@ impl LoadTask {
 /// List task payload.
 #[derive(Debug)]
 pub struct ListTask {
-    storage_root: StorageRoot,
+    storage_root: StorageLocation,
 }
 
 impl ListTask {
     /// Create a new list task.
-    pub fn new(storage_root: StorageRoot) -> Self {
+    pub fn new(storage_root: StorageLocation) -> Self {
         Self { storage_root }
     }
 
@@ -672,7 +673,7 @@ impl ListTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        let storage = SessionStorage::new(self.storage_root)?;
+        let storage = SessionStorage::new(resolve_location(&self.storage_root)?)?;
         let result = storage.list_sessions()?;
         Ok(PersistenceOutput::Listed(result))
     }
@@ -705,7 +706,7 @@ impl DeleteTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        let storage = SessionStorage::new(self.target.storage_root)?;
+        let storage = SessionStorage::new(resolve_location(&self.target.storage_root)?)?;
         let lock = storage.lock(&self.target.session_id)?;
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
@@ -726,13 +727,13 @@ impl DeleteTask {
 /// Import task payload.
 #[derive(Debug)]
 pub struct ImportTask {
-    storage_root: StorageRoot,
+    storage_root: StorageLocation,
     candidate: Box<SessionCandidate>,
 }
 
 impl ImportTask {
     /// Create a new import task.
-    pub fn new(storage_root: StorageRoot, candidate: Box<SessionCandidate>) -> Self {
+    pub fn new(storage_root: StorageLocation, candidate: Box<SessionCandidate>) -> Self {
         Self {
             storage_root,
             candidate,
@@ -750,7 +751,7 @@ impl ImportTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        let storage = SessionStorage::new(self.storage_root)?;
+        let storage = SessionStorage::new(resolve_location(&self.storage_root)?)?;
         let session_id = self.candidate.id().clone();
         let lock = storage.lock(&session_id)?;
         if cancel.is_cancelled() {
@@ -771,7 +772,7 @@ impl ImportTask {
 /// Prune task payload.
 #[derive(Debug)]
 pub struct PruneTask {
-    storage_root: StorageRoot,
+    storage_root: StorageLocation,
     policy: SessionRetentionPolicy,
     active_sessions: BTreeSet<StorageSessionId>,
 }
@@ -779,7 +780,7 @@ pub struct PruneTask {
 impl PruneTask {
     /// Create a new prune task.
     pub fn new(
-        storage_root: StorageRoot,
+        storage_root: StorageLocation,
         policy: SessionRetentionPolicy,
         active_sessions: BTreeSet<StorageSessionId>,
     ) -> Self {
@@ -801,7 +802,7 @@ impl PruneTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        let storage = SessionStorage::new(self.storage_root)?;
+        let storage = SessionStorage::new(resolve_location(&self.storage_root)?)?;
         let report = storage.prune_sessions(&self.policy, &self.active_sessions)?;
         Ok(PersistenceOutput::Pruned(report))
     }

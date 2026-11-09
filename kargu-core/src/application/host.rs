@@ -10,8 +10,7 @@ use crate::ipc::protocol::Fault;
 use crate::persistence::{
     CollisionPolicy, DeleteTask, ImportTask, ListTask, LoadTask, MaxSessionAge, MaxSessionBytes,
     MaxSessionCount, PersistenceTarget, PersistenceWork, PruneTask, RawSessionPayload, SaveTask,
-    SessionRecord, SessionRetentionPolicy, StorageRevision, StorageRoot, StorageSessionId,
-    migrate_candidate,
+    SessionRecord, SessionRetentionPolicy, StorageRevision, StorageSessionId, migrate_candidate,
 };
 use crate::providers::{ApiProviderId, ProviderCatalog};
 use serde::Deserialize;
@@ -37,7 +36,7 @@ struct ReadRequest<T> {
 #[serde(deny_unknown_fields)]
 struct PersistenceSaveParams {
     scope: ReadScope,
-    storage_root: std::path::PathBuf,
+    storage: crate::persistence::StorageLocation,
     expected_revision: u64,
     #[serde(default)]
     session_id: Option<String>,
@@ -48,7 +47,7 @@ struct PersistenceSaveParams {
 #[serde(deny_unknown_fields)]
 struct PersistenceLoadParams {
     scope: ReadScope,
-    storage_root: std::path::PathBuf,
+    storage: crate::persistence::StorageLocation,
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
@@ -59,14 +58,14 @@ struct PersistenceLoadParams {
 #[serde(deny_unknown_fields)]
 struct PersistenceListParams {
     scope: ReadScope,
-    storage_root: std::path::PathBuf,
+    storage: crate::persistence::StorageLocation,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistenceDeleteParams {
     scope: ReadScope,
-    storage_root: std::path::PathBuf,
+    storage: crate::persistence::StorageLocation,
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
@@ -77,7 +76,7 @@ struct PersistenceDeleteParams {
 #[serde(deny_unknown_fields)]
 struct PersistenceImportParams {
     scope: ReadScope,
-    storage_root: std::path::PathBuf,
+    storage: crate::persistence::StorageLocation,
     source_payload: Value,
     #[serde(default)]
     session_id: Option<String>,
@@ -89,7 +88,7 @@ struct PersistenceImportParams {
 #[serde(deny_unknown_fields)]
 struct PersistencePruneParams {
     scope: ReadScope,
-    storage_root: std::path::PathBuf,
+    storage: crate::persistence::StorageLocation,
     #[serde(default)]
     max_count: Option<usize>,
     #[serde(default)]
@@ -110,11 +109,6 @@ struct SessionRestoreParams {
     candidate: Value,
     #[serde(default)]
     expected_root: Option<std::path::PathBuf>,
-}
-
-fn parse_storage_root(path: &std::path::Path) -> Result<StorageRoot, Fault> {
-    crate::workspace::command::validate_path(path).map_err(|_| Fault::params())?;
-    StorageRoot::try_from(path).map_err(|_| Fault::params())
 }
 
 fn parse_collision_policy(
@@ -871,7 +865,7 @@ impl Host {
         if !self.owns_read_scope(&args.scope) {
             return Err(owner_fault());
         }
-        let storage_root = parse_storage_root(&args.storage_root)?;
+        let storage_root = args.storage;
         let session_id = match args.session_id.as_deref() {
             Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
             None => StorageSessionId::try_from(args.scope.session_id.as_str())
@@ -905,7 +899,7 @@ impl Host {
         if !self.owns_read_scope(&args.scope) {
             return Err(owner_fault());
         }
-        let storage_root = parse_storage_root(&args.storage_root)?;
+        let storage_root = args.storage;
         let session_id = match args.session_id.as_deref() {
             Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
             None => StorageSessionId::try_from(args.scope.session_id.as_str())
@@ -931,7 +925,7 @@ impl Host {
         if !self.owns_read_scope(&args.scope) {
             return Err(owner_fault());
         }
-        let storage_root = parse_storage_root(&args.storage_root)?;
+        let storage_root = args.storage;
         let work = PersistenceWork::List(ListTask::new(storage_root));
         Ok((args.scope, work))
     }
@@ -948,7 +942,7 @@ impl Host {
         if !self.owns_read_scope(&args.scope) {
             return Err(owner_fault());
         }
-        let storage_root = parse_storage_root(&args.storage_root)?;
+        let storage_root = args.storage;
         let session_id = match args.session_id.as_deref() {
             Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
             None => StorageSessionId::try_from(args.scope.session_id.as_str())
@@ -974,7 +968,7 @@ impl Host {
         if !self.owns_read_scope(&args.scope) {
             return Err(owner_fault());
         }
-        let storage_root = parse_storage_root(&args.storage_root)?;
+        let storage_root = args.storage;
         let session_id = match args.session_id.as_deref() {
             Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
             None => StorageSessionId::try_from(args.scope.session_id.as_str())
@@ -1003,7 +997,7 @@ impl Host {
         if !self.owns_read_scope(&args.scope) {
             return Err(owner_fault());
         }
-        let storage_root = parse_storage_root(&args.storage_root)?;
+        let storage_root = args.storage;
         let policy = SessionRetentionPolicy::new(
             args.max_count.map(MaxSessionCount::from_usize),
             args.max_bytes.map(MaxSessionBytes::from_u64),

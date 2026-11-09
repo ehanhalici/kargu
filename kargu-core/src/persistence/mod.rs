@@ -2,6 +2,7 @@
 
 pub mod domain;
 pub mod journal;
+pub mod layout;
 pub mod migration;
 pub mod recovery;
 pub mod repair;
@@ -25,6 +26,8 @@ pub use journal::{
     calculate_digest, recover_last_checkpoint,
 };
 
+pub use layout::{StorageLayout, StorageLocation};
+
 pub use migration::{
     CollisionPolicy, RawSessionPayload, SessionCandidate, SessionSourceFormat, migrate_candidate,
 };
@@ -35,7 +38,7 @@ pub use recovery::{
 
 pub use repair::repair_protocol;
 
-pub use storage::{SessionLock, SessionStorage};
+pub use storage::{SessionLock, SessionStorage, resolve_location};
 
 pub use worker::{
     CompletionVerdict, DeleteTask, Durability, ImportTask, ListTask, LoadTask,

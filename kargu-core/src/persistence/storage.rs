@@ -17,6 +17,7 @@ use crate::{
             PrunedSessionCount, RetainedSessionCount, RetentionReport, SessionListResult,
             SessionRecord, SessionRetentionPolicy, SessionSummary, StorageRoot, StorageSessionId,
         },
+        layout::StorageLocation,
         migration::SessionCandidate,
         recovery::{TailTruncation, recover_session_view},
     },
@@ -230,6 +231,29 @@ impl SessionStorage {
                 state.retained_bytes = state.retained_bytes.saturating_sub(item.bytes);
             }
         }
+    }
+}
+
+/// Resolve a storage choice to its directory, refusing links beneath the anchor.
+pub fn resolve_location(location: &StorageLocation) -> Result<StorageRoot, CoreError> {
+    let project = std::fs::canonicalize(location.project_root())?;
+    if !project.is_dir() {
+        return Err(CoreError::Rejected);
+    }
+    let layout = location.layout(&project)?;
+    for step in layout.steps() {
+        reject_link(step)?;
+    }
+    let directory = layout.steps().last().ok_or(CoreError::Rejected)?;
+    StorageRoot::try_from(directory.clone()).map_err(CoreError::from)
+}
+
+fn reject_link(path: &Path) -> Result<(), CoreError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(CoreError::Rejected),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 

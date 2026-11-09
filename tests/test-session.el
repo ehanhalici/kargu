@@ -26,7 +26,9 @@
              ((symbol-function 'kargu-bridge-session-delete)
               (lambda (_conn params cb &optional _buf)
                 (let* ((sid (gethash "session_id" params))
-                       (storage-dir (gethash "storage_root" params))
+                       (storage (gethash "storage" params))
+                       (storage-dir (kargu-session-storage-directory
+                                     (gethash "project_root" storage)))
                        (file (expand-file-name (format "%s.json" sid) storage-dir)))
                   (when (file-exists-p file)
                     (delete-file file))
@@ -789,6 +791,31 @@
       (puthash "monetary_reserved" -10 bad)
       (should-error (kargu-session-project-budget bad session)))
     (should (equal (kargu-session-usage-value session) orig))))
+
+(ert-deftest kargu-session-native-storage-names-a-choice-not-a-directory-test ()
+  "Native persistence requests carry the location choice, never a directory."
+  (let ((process-environment (cons "XDG_DATA_HOME" process-environment)))
+    (let* ((kargu-session-storage-location 'central)
+           (kargu-sessions-directory
+            (eval (car (get 'kargu-sessions-directory 'standard-value)) t))
+           (storage (kargu-session--native-storage "/tmp/kargu-proj/")))
+      (should (equal (gethash "location" storage) "central"))
+      (should (equal (gethash "project_root" storage) "/tmp/kargu-proj"))
+      (should (eq (gethash "xdg_data_home" storage) :json-null))
+      (should (equal (gethash "user_emacs_directory" storage)
+                     (expand-file-name user-emacs-directory)))
+      (should (eq (gethash "sessions_directory" storage) :json-null))
+      (should-not (gethash "storage_root" storage)))
+    (let* ((kargu-session-storage-location 'central)
+           (kargu-sessions-directory "/tmp/kargu-custom-sessions/")
+           (storage (kargu-session--native-storage "/tmp/kargu-proj")))
+      (should (equal (gethash "sessions_directory" storage)
+                     "/tmp/kargu-custom-sessions")))
+    (let ((kargu-session-storage-location 'project))
+      (should (equal (gethash "location" (kargu-session--native-storage "/tmp/p"))
+                     "project")))
+    (let ((kargu-session-storage-location 'elsewhere))
+      (should-error (kargu-session--native-storage "/tmp/p")))))
 
 (provide 'tests/test-session)
 ;;; test-session.el ends here
