@@ -18,7 +18,6 @@ pub mod models;
 pub mod persistence;
 pub mod policy;
 pub mod process;
-pub mod prompt;
 pub mod providers;
 pub mod run;
 pub mod security;

@@ -278,24 +278,6 @@ impl PersistenceService {
         Ok(tokio::task::spawn_blocking(move || execute_save(task)))
     }
 
-    /// Submit a candidate import to the background worker.
-    pub fn submit_import(
-        &mut self,
-        candidate: SessionCandidate,
-        deadline: Instant,
-    ) -> Result<tokio::task::JoinHandle<PersistenceCompletion>, CoreError> {
-        self.check_admission(deadline, limits::SESSION_MAX_FILE_BYTES)?;
-        let session_id = candidate.id().clone();
-        let epoch = self.advance_or_init_track(&session_id, StorageRevision::from_u64(1));
-        let task = ServiceImportTask {
-            storage: Arc::clone(&self.storage),
-            epoch,
-            session_id,
-            candidate,
-        };
-        Ok(tokio::task::spawn_blocking(move || execute_import(task)))
-    }
-
     /// Clear and advance epoch for a deleted session so in-flight tasks become stale.
     pub fn delete_session_track(&mut self, session_id: &StorageSessionId) {
         let entry = self
@@ -462,41 +444,6 @@ fn execute_service_delete(task: ServiceDeleteTask) -> PersistenceCompletion {
     };
     match task.storage.delete_session(&lock) {
         Ok(()) => PersistenceCompletion::SessionDeleted {
-            epoch: task.epoch,
-            session_id: task.session_id,
-            durability: Durability::Durable,
-        },
-        Err(e) => PersistenceCompletion::Failed {
-            epoch: task.epoch,
-            session_id: task.session_id,
-            error: e,
-            durability: Durability::Volatile,
-        },
-    }
-}
-
-struct ServiceImportTask {
-    storage: Arc<SessionStorage>,
-    epoch: StorageEpoch,
-    session_id: StorageSessionId,
-    candidate: SessionCandidate,
-}
-
-fn execute_import(task: ServiceImportTask) -> PersistenceCompletion {
-    let lock_res = task.storage.lock(&task.session_id);
-    let lock = match lock_res {
-        Ok(l) => l,
-        Err(e) => {
-            return PersistenceCompletion::Failed {
-                epoch: task.epoch,
-                session_id: task.session_id,
-                error: e,
-                durability: Durability::Volatile,
-            };
-        }
-    };
-    match task.storage.import_candidate(&lock, &task.candidate) {
-        Ok(()) => PersistenceCompletion::CandidateImported {
             epoch: task.epoch,
             session_id: task.session_id,
             durability: Durability::Durable,

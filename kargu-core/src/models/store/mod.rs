@@ -339,15 +339,6 @@ impl ModelStore {
             compact_threshold,
         })
     }
-    /// Return a specific model summary for a provider.
-    pub fn provider_model(
-        &self,
-        provider: &ApiProviderId,
-        model: &ModelId,
-    ) -> Option<ModelSummaryDto> {
-        let p = self.providers.get(provider)?;
-        self.entry_summary(p, model)
-    }
     fn entry_summary(&self, p: &Provider, id: &ModelId) -> Option<ModelSummaryDto> {
         let entry = p.entries.get(id)?;
         let raw = entry.effective().ok()?;

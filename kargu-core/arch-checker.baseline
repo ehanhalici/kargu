@@ -146,15 +146,10 @@ primitive-boundary	src/security/mod.rs	`stop_on_bytes` exposes a primitive acros
 primitive-boundary	src/sensors/coordinates.rs	`check_text` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/coordinates.rs	`contains` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/coordinates.rs	`offset` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/sensors/debugger.rs	`render_summary` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/diagnostics.rs	`has_native_severity` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/diagnostics.rs	`is_clean` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/diagnostics.rs	`render_for` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/sensors/mentions.rs	`escape_xml` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/sensors/mentions.rs	`estimate_tokens` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/mentions.rs	`new` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/sensors/mentions.rs	`render_xml` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/sensors/symbols.rs	`format_hover` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/symbols.rs	`format_xrefs` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/symbols/document.rs	`fresh_for` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/symbols/document.rs	`refusal_text` exposes a primitive across a module boundary; use a domain type
@@ -597,19 +592,6 @@ pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `new` is visible; 
 pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `pre_existing` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `resolved` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `path` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `byte_count` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `content` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `dirty` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `document_id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `hash` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `path` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `range` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `revision` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `status` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `target_id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `target` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `token_estimate` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `truncated` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`MentionSpan`: field `target` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols.rs	`XrefLocation`: field `path` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols.rs	`XrefLocation`: field `range` is visible; keep fields private and expose accessors

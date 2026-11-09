@@ -4,7 +4,6 @@
 //! publication or debugger reply belongs to the captured live resource.
 
 pub mod coordinates;
-pub mod debugger;
 pub mod diagnostics;
 pub(crate) mod mention_rpc;
 pub mod mentions;

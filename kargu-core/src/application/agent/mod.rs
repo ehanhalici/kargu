@@ -668,31 +668,9 @@ impl ApplicationActor {
             machine.healing.rounds,
         )))
     }
-    /// Assemble a canonical provider payload for a direct completion from native history.
-    pub fn direct_canonical_payload(
-        &self,
-        session: &crate::domain::SessionId,
-        spec: CanonicalPayloadSpec<'_>,
-    ) -> Result<Box<RawValue>, CoreError> {
-        let (_revision, stored) = self.history_snapshot(session)?;
-        build_canonical_payload(spec, stored.iter().map(StoredMessage::message)).map_err(|error| {
-            match error {
-                crate::api::ApiError::Limit => CoreError::Limit,
-                _ => CoreError::InvalidToolOutput,
-            }
-        })
-    }
     /// Read an exact run's native phase without admitting work or touching IO.
     pub fn agent_phase(&self, run: &RunHandle) -> Result<AgentPhase, CoreError> {
         Ok(self.agent(run)?.phase.view())
-    }
-    /// Borrow the active summary candidate if the agent is in Summary phase.
-    pub fn summary_candidate(&self, run: &RunHandle) -> Result<&SummaryCandidate, CoreError> {
-        self.validate(run)?;
-        match &self.agent(run)?.phase {
-            Phase::Summary { candidate, .. } => Ok(candidate),
-            _ => Err(CoreError::StaleOwner),
-        }
     }
     /// Freeze one complete outbound history/schema snapshot. A second request
     /// cannot overtake the first, and partial stream deltas never enter history.

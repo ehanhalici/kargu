@@ -172,17 +172,6 @@ impl SessionJournalWriter {
         self.append_entry(entry)
     }
 
-    /// Atomically commit checkpoint order: journal fsync first, then snapshot publish.
-    pub fn commit_snapshot(
-        &mut self,
-        storage: &SessionStorage,
-        record: &SessionRecord,
-    ) -> Result<(), CoreError> {
-        self.ensure_active()?;
-        self.append_checkpoint(record)?;
-        storage.save_snapshot(&self._lock, record)
-    }
-
     fn ensure_active(&self) -> Result<(), CoreError> {
         if self.state == WriterState::Poisoned {
             Err(CoreError::Rejected)

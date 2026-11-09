@@ -252,26 +252,6 @@ impl AttemptBounds {
         Ok(self)
     }
 
-    /// Attach an optional cache-read upper bound.
-    pub fn with_cache_read(mut self, cache_read: CachedTokens) -> Result<Self, CoreError> {
-        let write = self.cache_write.map_or(0, |w| w.as_u64());
-        let sum = match cache_read.as_u64().checked_add(write) {
-            Some(sum) => sum,
-            None => {
-                return Err(CoreError::InvalidValue {
-                    field: "AttemptBounds",
-                });
-            }
-        };
-        if sum > self.input.as_u64() {
-            return Err(CoreError::InvalidValue {
-                field: "AttemptBounds",
-            });
-        }
-        self.cache_read = Some(cache_read);
-        Ok(self)
-    }
-
     /// Prompt input tokens upper bound.
     pub fn input(&self) -> InputTokens {
         self.input

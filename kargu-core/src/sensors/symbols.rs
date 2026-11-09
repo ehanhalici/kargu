@@ -133,41 +133,6 @@ pub struct XrefLocation {
     pub summary: Option<SensorText>,
 }
 
-/// A hover tooltip snapshot.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct HoverSnapshot {
-    /// Target source range of hover.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    range: Option<SourceRange>,
-    /// Markdown or text documentation chunks.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    contents: Vec<SensorText>,
-}
-
-/// Outcome of symbol resolution.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum SymbolResolution {
-    /// A single unambiguous definition or reference.
-    Resolved {
-        /// Target location.
-        location: XrefLocation,
-    },
-    /// Multiple candidate definitions or references.
-    Ambiguous {
-        /// All resolved candidate locations.
-        candidates: Vec<XrefLocation>,
-    },
-    /// Symbol was not found.
-    NotFound,
-    /// Symbol resolution service is unavailable.
-    Unavailable {
-        /// Reason for unavailability.
-        reason: String,
-    },
-}
-
 /// Format a list of Xref locations with explicit truncation.
 pub fn format_xrefs(locations: &[XrefLocation], max_items: usize) -> String {
     let mut out = String::new();
@@ -189,19 +154,6 @@ pub fn format_xrefs(locations: &[XrefLocation], max_items: usize) -> String {
         out.push_str(&format!("... and {} more locations\n", total - max_items));
     }
     out
-}
-
-/// Format a hover snapshot.
-pub fn format_hover(hover: &HoverSnapshot) -> String {
-    if hover.contents.is_empty() {
-        return "(no hover information)".to_string();
-    }
-    hover
-        .contents
-        .iter()
-        .map(|c| c.as_str())
-        .collect::<Vec<_>>()
-        .join("\n---\n")
 }
 
 /// Cap on the total symbols in a skeleton.

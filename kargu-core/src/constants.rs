@@ -465,8 +465,6 @@ pub mod protocol {
         pub const PROVIDER_LIST: &str = "provider/list";
         /// List models for a provider with reasoning capabilities.
         pub const MODEL_LIST: &str = "model/list";
-        /// Validate and select provider, model, and reasoning effort.
-        pub const MODEL_SELECT: &str = "model/select";
         /// Fetch remote model catalog and refresh store asynchronously.
         pub const MODEL_REFRESH: &str = "model/refresh";
         /// Owned HTTP attempt with bounded SSE deltas and explicit cancellation.
@@ -600,6 +598,3 @@ pub mod protocol {
             Reply with the summary only.";
     }
 }
-
-/// Embedded default system prompt asset.
-pub const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../kargu/prompt/default.txt");

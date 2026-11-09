@@ -935,12 +935,6 @@ impl SessionRecord {
         self.revision
     }
 
-    /// Update record revision.
-    pub fn with_revision(mut self, rev: StorageRevision) -> Self {
-        self.revision = rev;
-        self
-    }
-
     /// Optional mode.
     pub fn mode(&self) -> Option<&SessionMode> {
         self.mode.as_ref()

@@ -146,15 +146,6 @@ impl PricingRates {
             cache_write,
         }
     }
-    /// Capture rates directly from model metadata fields.
-    pub fn from_fields(fields: &crate::models::metadata::ModelFields) -> Self {
-        Self::new(
-            fields.input_cost(),
-            fields.output_cost(),
-            fields.cache_read_cost(),
-            fields.cache_write_cost(),
-        )
-    }
     /// Price complete observed usage without rounding or counting cache twice.
     /// Incomplete usage, a required missing rate or fractional final micro-USD
     /// remains unknown. This calculation does not reserve future expenditure.
