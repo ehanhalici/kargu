@@ -113,6 +113,51 @@ ve diğer global tüketiciler aşağıdaki gruplarda açık kalır.
 Todo 2 native araç consumer kapanışı ve kalan köprü envanteri [58_NATIVE_TOOLS_COMPLETE.md](.agents/skills/native-tools/references/58_NATIVE_TOOLS_COMPLETE.md)
 üzerindedir; edit/sensör/run göçlerinin yerine geçmez. Yeni paralel iş listesi yoktur.
 
+## Modül denetimi (2026-11-09)
+
+Kapsam: modül ayrılığı, sınır/kısıt netliği ve modüller arası uyum (Rust ve Elisp
+birlikte). Uç durum senaryoları kapsam dışı. Taramalar arch-checker, check-declare,
+byte-compile (error-on-warn) ve üç bağımsız read-only denetimle yapıldı.
+
+**Kapanan bulgular (commit):**
+- **Mode ve plan köprüsü** (`7484367`): RPC'ler core'a hiç gitmiyordu
+  (`application-ensure` tek argümanla çağrılıyordu, `bridge/plan` hiç yüklenmiyordu).
+  Ortak `kargu-bridge-conversation-with` lease zinciri kuruldu.
+- **Persistence doğrulaması** (`d0bdf17`): alanlar load'da doğrulanmıyordu. Call id ve
+  tool name kuralları tekleştirildi. Session/history limitleri birbirinden türetildi.
+- **Rust modül grafiği döngüsüz** (`da498a4` … `5d0bad4`): `domain::error`,
+  `domain::rpc`, `run`, `policy`, `intent` modülleri ve `RunLedger` port'u eklendi.
+  arch-checker'a `module-cycle` kuralı eklendi; yeni döngüler commit'te reddediliyor.
+- **Tek kurallar** (`0531573`): yol kuralı `domain::check_path`, edit yayın sayacı
+  `ChangeRevision`, `BASH_TOOL` sabiti.
+- **Ölü kod** (`dbf79f1` Rust, `04367be` / `3ebaeb6` Elisp): her değişkenin tek sahibi
+  var. `declare-function`'lar gerçek dosya ve arglist'i gösteriyor. JSON
+  equal/detach yardımcıları tekleştirildi.
+
+**Silinen planlı kod — geri almak için `git show dbf79f1^:<yol>`:**
+- `kargu-core/src/prompt/` (5.13)
+- `kargu-core/src/sensors/debugger.rs` (Dape grubu)
+- `sensors/mentions.rs` içindeki attachment ledger ve prompt envelope
+
+**Açık kalanlar (kapsam içi, ayrı iş):**
+- [ ] **AUD-1 Modüller arası durum değişkenleri:** Paylaşılan durum, private
+  değişken adlarıyla dolaşıyor. `kargu-chat--project-root` 4 modülde,
+  `kargu-permission--override-root` 9 dosyada, `kargu-providers--table`,
+  `kargu-bridge-edit-document--id`, `kargu--state-store` ve
+  `kargu-confirm--mock-decision` de bu durumda. Accessor'a ya da sahip modüle
+  taşınmalı.
+- [ ] **AUD-2 Proje kökü çözücüleri:** `permission/guards.el`, `tools/lsp/context.el`
+  ve `chat/session.el` farklı öncelikle çözüyor. Tek otorite `guards` olmalı;
+  chat kökü onun ilk kaynağı olmalı.
+- [ ] **AUD-3 Üretimde çağrılmayan ama testlerde yoğun kullanılan portlar:**
+  `kargu-bridge-models-snapshot`, `kargu-bridge-edit-prepare`, diff plan API'si
+  (`kargu-edit-plan-create` / `kargu-diff-submit-plan`). Tüketicisi bağlanacak mı,
+  yoksa testleriyle silinecek mi, karar verilmeli.
+- [ ] **AUD-4 Elisp'te ikinci yol hesabı:** `chat/session/storage.el`'deki proje anahtarı
+  ve dizin hesabı Rust `persistence/layout.rs`'in kopyası. Yalnız testler ve
+  import seçicisi kullanıyor; 7.5c2 ile kaldırılmalı.
+- Plan otoritesi: 5.7c. Native history ve kayıt kaynağı: 5.1b / 7.5c2.
+
 ## Gruplar ve önkoşullar
 
 Numara varsayılan çalışma sırasıdır. Önkoşulu hazır bağımsız bir grup öne
@@ -4075,6 +4120,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   Ayrıntı ve açık teknik bulgular: [.agents/skills/audit-and-review/references/migration-review-2026-11-01.md](.agents/skills/audit-and-review/references/migration-review-2026-11-01.md).
 
   - [ ] **5.13 Prompt ve instruction motoru** — kalan belirgin domain açığı:
+    **Not (2026-11-09):** Bağlanmamış Rust prompt motoru modül denetiminde silindi (`dbf79f1`); bu iş başlarken `git show dbf79f1^:kargu-core/src/prompt` ile geri alınabilir.
     `prompt.el` hâlâ instructions/env/skills/mode/tools metni ve cache key üretir.
     Rust'ta mevcut history/wire/config/metadata portlarına bağla; yeni Elisp motoru kurma.
 
