@@ -15,7 +15,9 @@ use crate::{
             JournalByteOffset, PersistenceError, SessionRecord, StorageSequence, StorageSessionId,
         },
         journal::{JournalEntry, JournalEnvelope, JournalRecordDigest, calculate_digest},
-        storage::SessionStorage,
+        layout::StorageLocation,
+        migration::RawSessionPayload,
+        storage::{SessionStorage, resolve_location},
     },
 };
 use nix::{
@@ -236,6 +238,32 @@ fn load_snapshot_view(
     }
     record.validate_record()?;
     Ok(Some(record))
+}
+
+/// Read `id`'s snapshot from `source` for import without creating directories.
+///
+/// The source may predate private file modes, so only ownership, a regular
+/// unlinked file and the size bound are required; the payload is migrated later.
+pub fn read_import_source(
+    source: &StorageLocation,
+    id: &StorageSessionId,
+) -> Result<RawSessionPayload, CoreError> {
+    let path = resolve_location(source)?.session_file(id)?;
+    let raw = open(
+        &path,
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(os_err)?;
+    let file = File::from(raw);
+    let meta = file.metadata()?;
+    if meta.uid() != nix::unistd::geteuid().as_raw() {
+        return Err(CoreError::StaleOwner);
+    }
+    if !meta.is_file() {
+        return Err(CoreError::Rejected);
+    }
+    Ok(RawSessionPayload::try_from(read_bounded_file(file)?)?)
 }
 
 fn read_bounded_file(mut file: File) -> Result<String, CoreError> {

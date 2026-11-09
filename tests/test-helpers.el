@@ -14,6 +14,8 @@
 (require 'kargu/tools/skill)
 
 (defvar kargu-selection-port)
+(defvar kargu-sessions-directory)
+(defvar kargu-session-auto-restore)
 (defvar kargu-mode-port)
 (declare-function kargu-selection-create "kargu/contract/selection" (&rest args))
 (declare-function kargu-selection-provider-value "kargu/contract/selection" (selection))
@@ -408,6 +410,9 @@ Tests never see the working tree of Kargu as their project."
         (kargu-selection-port #'kargu-test-selection-port)
         (kargu-mode-port #'kargu-test-mode-port)
         (kargu-bridge-binary-path (or (getenv "KARGU_CORE_TEST_BINARY") kargu-bridge-binary-path))
+        ;; Native persistence writes under the scratch root, never the user's data.
+        (kargu-sessions-directory (expand-file-name "sessions" (kargu-test-scratch-root)))
+        (kargu-session-auto-restore nil)
         (kargu-diff--changed (if (and (boundp 'kargu-diff--changed)
                                       (hash-table-p kargu-diff--changed))
                                  (copy-hash-table kargu-diff--changed)

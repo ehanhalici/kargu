@@ -431,6 +431,35 @@ impl TryFrom<&str> for SessionProjectName {
     }
 }
 
+/// Persisted spend in USD: finite, non-negative and bounded.
+///
+/// The JSON number is kept as written, so an editor's integer `0` is not
+/// returned as `0.0` and editor-side integer contracts still hold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "serde_json::Number", into = "serde_json::Number")]
+pub struct SessionMonetaryAmount(serde_json::Number);
+
+impl SessionMonetaryAmount {
+    const MAX_USD: f64 = 1.0e9;
+}
+
+impl TryFrom<serde_json::Number> for SessionMonetaryAmount {
+    type Error = PersistenceError;
+
+    fn try_from(value: serde_json::Number) -> Result<Self, Self::Error> {
+        match value.as_f64() {
+            Some(usd) if usd.is_finite() && (0.0..=Self::MAX_USD).contains(&usd) => Ok(Self(value)),
+            _ => Err(PersistenceError::Validation("invalid monetary amount")),
+        }
+    }
+}
+
+impl From<SessionMonetaryAmount> for serde_json::Number {
+    fn from(amount: SessionMonetaryAmount) -> Self {
+        amount.0
+    }
+}
+
 /// Validated session title.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SessionTitle(String);
@@ -853,6 +882,16 @@ pub struct SessionRecord {
     tokens_out: Option<TokenCount>,
     #[serde(skip_serializing_if = "Option::is_none")]
     requests: Option<RequestCount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tokens_spent: Option<TokenCount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tokens_unknown: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    monetary_spent: Option<SessionMonetaryAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    monetary_reserved: Option<SessionMonetaryAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    monetary_unknown: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_root: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1031,6 +1070,11 @@ impl fmt::Debug for SessionRecord {
             .field("tokens_in", &self.tokens_in)
             .field("tokens_out", &self.tokens_out)
             .field("requests", &self.requests)
+            .field("tokens_spent", &self.tokens_spent)
+            .field("tokens_unknown", &self.tokens_unknown)
+            .field("monetary_spent", &self.monetary_spent)
+            .field("monetary_reserved", &self.monetary_reserved)
+            .field("monetary_unknown", &self.monetary_unknown)
             .field("project_root", &self.project_root)
             .field("project_name", &self.project_name)
             .field("title", &self.title)

@@ -981,3 +981,44 @@ async fn persistence_service_delete_recreate_rejects_stale_callback() -> TestRes
     assert_eq!(verdict_stale, CompletionVerdict::StaleEpoch);
     Ok(())
 }
+
+#[test]
+fn editor_accounting_fields_survive_a_save_round_trip() -> TestResult {
+    let source = r#"{"schema_version":2,"id":"acct","revision":1,"messages":[],
+        "tokens_in":10,"tokens_out":5,"tokens_spent":15,"tokens_unknown":false,
+        "monetary_spent":0.25,"monetary_reserved":0.1,"monetary_unknown":false}"#;
+    let record = SessionRecord::try_from(source)?;
+    let value = serde_json::to_value(&record)?;
+    assert_eq!(value["tokens_spent"], 15);
+    assert_eq!(value["tokens_unknown"], false);
+    assert_eq!(value["monetary_spent"], 0.25);
+    assert_eq!(value["monetary_reserved"], 0.1);
+    assert_eq!(value["monetary_unknown"], false);
+    let integral = SessionRecord::try_from(source.replace("0.25", "0").as_str())?;
+    assert!(serde_json::to_value(&integral)?["monetary_spent"].is_u64());
+    let negative = source.replace("\"monetary_spent\":0.25", "\"monetary_spent\":-1");
+    assert!(SessionRecord::try_from(negative.as_str()).is_err());
+    Ok(())
+}
+
+#[test]
+fn listing_is_newest_first_with_descending_id_ties() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
+    let storage = SessionStorage::new(StorageRoot::try_from(temp_dir.path().to_path_buf())?)?;
+    for (id, updated) in [
+        ("a-old", "2026-01-01 00:00:00"),
+        ("z-new", "2026-03-01 00:00:00"),
+        ("b-tie", "2026-02-01 00:00:00"),
+        ("c-tie", "2026-02-01 00:00:00"),
+    ] {
+        let sid = StorageSessionId::try_from(id)?;
+        let lock = storage.lock(&sid)?;
+        let source =
+            format!(r#"{{"schema_version":2,"id":"{id}","updated_at":"{updated}","messages":[]}}"#);
+        storage.save_snapshot(&lock, &SessionRecord::try_from(source.as_str())?)?;
+    }
+    let listed = storage.list_sessions()?;
+    let ids: Vec<&str> = listed.summaries().iter().map(|s| s.id().as_str()).collect();
+    assert_eq!(ids, ["z-new", "c-tie", "b-tie", "a-old"]);
+    Ok(())
+}

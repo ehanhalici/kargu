@@ -15,7 +15,8 @@ use crate::{
             SessionRetentionPolicy, StorageRevision, StorageSessionId,
         },
         layout::StorageLocation,
-        migration::SessionCandidate,
+        migration::{CollisionPolicy, SessionCandidate, migrate_candidate},
+        recovery::read_import_source,
         storage::{SessionLock, SessionStorage, resolve_location},
     },
 };
@@ -724,19 +725,63 @@ impl DeleteTask {
     }
 }
 
+/// Where an import's session payload comes from.
+#[derive(Debug)]
+enum ImportSource {
+    /// A payload the caller already supplied and the actor migrated.
+    Candidate(Box<SessionCandidate>),
+    /// A snapshot the worker reads from another storage location.
+    Local {
+        location: StorageLocation,
+        id: StorageSessionId,
+        collision: CollisionPolicy,
+    },
+}
+
 /// Import task payload.
 #[derive(Debug)]
 pub struct ImportTask {
     storage_root: StorageLocation,
-    candidate: Box<SessionCandidate>,
+    source: ImportSource,
 }
 
 impl ImportTask {
-    /// Create a new import task.
+    /// Create a new import task for an already migrated candidate.
     pub fn new(storage_root: StorageLocation, candidate: Box<SessionCandidate>) -> Self {
         Self {
             storage_root,
-            candidate,
+            source: ImportSource::Candidate(candidate),
+        }
+    }
+
+    /// Import `id` from `source`, read and migrated on the worker.
+    pub fn from_location(
+        storage_root: StorageLocation,
+        source: StorageLocation,
+        target: (StorageSessionId, CollisionPolicy),
+    ) -> Self {
+        let (id, collision) = target;
+        Self {
+            storage_root,
+            source: ImportSource::Local {
+                location: source,
+                id,
+                collision,
+            },
+        }
+    }
+
+    fn candidate(source: ImportSource) -> Result<Box<SessionCandidate>, CoreError> {
+        match source {
+            ImportSource::Candidate(candidate) => Ok(candidate),
+            ImportSource::Local {
+                location,
+                id,
+                collision,
+            } => {
+                let payload = read_import_source(&location, &id)?;
+                Ok(Box::new(migrate_candidate(&payload, &collision)?))
+            }
         }
     }
 
@@ -751,8 +796,9 @@ impl ImportTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
+        let candidate = Self::candidate(self.source)?;
         let storage = SessionStorage::new(resolve_location(&self.storage_root)?)?;
-        let session_id = self.candidate.id().clone();
+        let session_id = candidate.id().clone();
         let lock = storage.lock(&session_id)?;
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
@@ -760,8 +806,8 @@ impl ImportTask {
         if Instant::now() >= deadline {
             return Err(CoreError::Deadline);
         }
-        storage.import_candidate(&lock, &self.candidate)?;
-        let rev = self.candidate.record().revision();
+        storage.import_candidate(&lock, &candidate)?;
+        let rev = candidate.record().revision();
         Ok(PersistenceOutput::Imported {
             session_id,
             revision: rev,

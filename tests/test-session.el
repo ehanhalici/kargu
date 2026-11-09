@@ -5,6 +5,7 @@
 
 (require 'ert)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 (require 'kargu)
 (require 'kargu/chat/session)
 (require 'kargu/chat)
@@ -13,27 +14,44 @@
 (declare-function kargu-api-select--stay-on-field "kargu/api/select" (field))
 
 (defmacro kargu-test-with-session-bridge (&rest body)
-  "Execute BODY with a mock session bridge saving to local test storage."
+  "Run BODY against the real native persistence core.
+Storage is native; tests observe it only through the public flows."
   (declare (indent 0))
-  `(cl-letf (((symbol-function 'kargu-bridge-session-scope)
-              (lambda (_buf cb) (funcall cb (kargu-bridge--connection-create :state 'ready :epoch "mock-epoch") 'mock-scope nil)))
-             ((symbol-function 'kargu-bridge-session-save)
-              (lambda (_conn params cb &optional _buf)
-                (let* ((rec (gethash "record" params))
-                       (root (or (kargu-aget rec "project_root") default-directory)))
-                  (kargu-session-storage-write (kargu-aget rec "id") root rec)
-                  (when cb (funcall cb (kargu-bridge--object "status" "ok") nil)))))
-             ((symbol-function 'kargu-bridge-session-delete)
-              (lambda (_conn params cb &optional _buf)
-                (let* ((sid (gethash "session_id" params))
-                       (storage (gethash "storage" params))
-                       (storage-dir (kargu-session-storage-directory
-                                     (gethash "project_root" storage)))
-                       (file (expand-file-name (format "%s.json" sid) storage-dir)))
-                  (when (file-exists-p file)
-                    (delete-file file))
-                  (when cb (funcall cb (kargu-bridge--object "status" "ok" "deleted" t) nil))))))
-     ,@body))
+  `(let ((binary (getenv "KARGU_CORE_TEST_BINARY")))
+     (unless (and binary (file-executable-p binary))
+       (ert-skip "A configured native test binary is required"))
+     (let ((kargu-bridge-binary-path binary))
+       ,@body)))
+
+(defun kargu-test-session--await (start)
+  "Call START with a callback, wait for it and return its arguments."
+  (let (reply)
+    (funcall start (lambda (&rest arguments) (setq reply (or arguments (list nil)))))
+    (kargu-bridge-test--wait (lambda () reply))
+    (should reply)
+    reply))
+
+(defun kargu-test-session--save (buffer)
+  "Save BUFFER natively and return its (RESULT ERROR)."
+  (let ((reply (kargu-test-session--await
+                (lambda (done) (kargu-session-save buffer done)))))
+    (should-not (cadr reply))
+    reply))
+
+(defun kargu-test-session--list (root)
+  "Return ROOT's native session listing, newest first."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (setq-local kargu-chat--project-root (file-name-as-directory root))
+    (let ((reply (kargu-test-session--await
+                  (lambda (done) (kargu-session-list-async root done (current-buffer))))))
+      (should-not (cadr reply))
+      (car reply))))
+
+(defun kargu-test-session--load (session buffer root)
+  "Load SESSION into BUFFER for ROOT natively and return (BUFFER ERROR)."
+  (kargu-test-session--await
+   (lambda (done) (kargu-session-load session buffer root :callback done))))
 
 (ert-deftest kargu-session-storage-paths-reject-traversal-and-symlinks-test ()
   "Session identities cannot read, delete or overwrite files outside storage."
@@ -48,16 +66,13 @@
 				(should-error (kargu-session-storage-file id repo)))
 			      (make-symbolic-link victim (expand-file-name "safe.json" storage))
 			      (should-error (kargu-session-storage-file "safe" repo))
-			      (should-error (kargu-session-delete "safe" repo))
-			      (should-error (kargu-session--read-data "safe" repo))
-			      (let ((read-file (symbol-function 'insert-file-contents)) read-link)
-				(cl-letf (((symbol-function 'insert-file-contents)
-					   (lambda (file &rest arguments)
-					     (when (equal file (expand-file-name "safe.json" storage))
-					       (setq read-link t))
-					     (apply read-file file arguments))))
-				  (should-not (kargu-session-list repo))
-				  (should-not read-link)))
+			      (dolist (id '("../victim" "/absolute" "a/b"))
+				(should-error (kargu-session-delete id repo))
+				(should-error (kargu-session-load id nil repo)))
+			      ;; The native reader never follows the planted link.
+			      (kargu-test-with-session-bridge
+				(should-not (kargu-test-session--list repo))
+				(should (cadr (kargu-test-session--load "safe" nil repo))))
 			      (with-temp-buffer
 				(insert-file-contents victim)
 				(should (equal (buffer-string) "preserve")))
@@ -141,12 +156,20 @@
               (insert "## you · 12:00\nHello Kargu\n\n## kargu · model\nHello! How can I help?\n"))
             (kargu-chat--ensure-idle-prompt)
             ;; Save session
-            (let ((file (kargu-session-save buf1)))
-              (should (stringp file))
-              (should (file-exists-p file))))
+            (kargu-test-session--save buf1)
+            ;; Native layout matches the editor's legacy path for the same project.
+            (let ((saved (with-temp-buffer
+                           (insert-file-contents
+                            (kargu-session-storage-file "session-test-001" proj-dir))
+                           (json-parse-buffer))))
+              ;; Editor accounting survives the native record schema.
+              (dolist (key '("tokens_unknown" "monetary_spent" "monetary_reserved"
+                             "monetary_unknown"))
+                (should (gethash key saved)))
+              (should (integerp (gethash "monetary_spent" saved)))))
 
           ;; List sessions
-          (let ((sessions (kargu-session-list proj-dir)))
+          (let ((sessions (kargu-test-session--list proj-dir)))
             (should (= (length sessions) 1))
             (should (equal (kargu-aget (car sessions) "id") "session-test-001"))
             (should (equal (kargu-aget (car sessions) "title") "Test Chat Session")))
@@ -155,12 +178,17 @@
           (with-current-buffer buf2
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root (file-name-as-directory proj-dir))
-            (kargu-session-load "session-test-001" buf2 proj-dir)
+            (should-not (cadr (kargu-test-session--load "session-test-001" buf2 proj-dir)))
             ;; Verify properties restored in buf2
             (should (equal kargu-chat--session-id "session-test-001"))
             (should (equal kargu--session-id "session-test-001"))
             (should (equal kargu-chat--session-title "Test Chat Session"))
-            (should (equal (kargu-history-messages) test-msgs))
+            ;; JSON objects carry no key order; compare the fields, not alist order.
+            (let ((fields (lambda (messages)
+                            (mapcar (lambda (m) (list (kargu-aget m "role") (kargu-aget m "content")))
+                                    messages))))
+              (should (equal (funcall fields (kargu-history-messages))
+                             (funcall fields test-msgs))))
             (let ((content (buffer-string)))
               (should (string-match-p "Hello Kargu" content))
               (should (string-match-p "Hello! How can I help?" content))
@@ -192,8 +220,8 @@
             (let ((inhibit-read-only t))
               (insert "## you · 12:00\nRemember the provider\n"))
             (kargu-selection-update :provider "openrouter" :model "kept-model")
-            (kargu-session-save buf1))
-          (let ((sessions (kargu-session-list proj-dir)))
+            (kargu-test-session--save buf1))
+          (let ((sessions (kargu-test-session--list proj-dir)))
             (should (equal (kargu-aget (car sessions) "provider") "openrouter"))
             (should (equal (kargu-aget (car sessions) "model") "kept-model")))
           (setf (kargu-selection-provider) nil
@@ -201,7 +229,7 @@
           (with-current-buffer buf2
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root (file-name-as-directory proj-dir))
-            (kargu-session-load "session-prov-001" buf2 proj-dir)
+            (should-not (cadr (kargu-test-session--load "session-prov-001" buf2 proj-dir)))
             (should (equal (kargu-selection-provider) "openrouter"))
             (should (equal (kargu-selection-model) "kept-model"))
             (should (eq (kargu-state-provider) 'openrouter))
@@ -232,7 +260,7 @@
             (setf (kargu-history-messages) '((("role" . "user") ("content" . "In Proj A"))))
             (let ((inhibit-read-only t))
               (insert "Turn A\n"))
-            (kargu-session-save bufA))
+            (kargu-test-session--save bufA))
 
           (with-current-buffer bufB
             (kargu-chat-mode)
@@ -242,15 +270,15 @@
             (setf (kargu-history-messages) '((("role" . "user") ("content" . "In Proj B"))))
             (let ((inhibit-read-only t))
               (insert "Turn B\n"))
-            (kargu-session-save bufB))
+            (kargu-test-session--save bufB))
 
           ;; Verify Proj A sessions
-          (let ((sessionsA (kargu-session-list projA)))
+          (let ((sessionsA (kargu-test-session--list projA)))
             (should (= (length sessionsA) 1))
             (should (equal (kargu-aget (car sessionsA) "id") "session-A")))
 
           ;; Verify Proj B sessions
-          (let ((sessionsB (kargu-session-list projB)))
+          (let ((sessionsB (kargu-test-session--list projB)))
             (should (= (length sessionsB) 1))
             (should (equal (kargu-aget (car sessionsB) "id") "session-B"))))
       (when (buffer-live-p bufA) (kill-buffer bufA))
@@ -278,7 +306,7 @@
             (setf (kargu-history-messages) '((("role" . "user") ("content" . "Persistent query"))))
             (let ((inhibit-read-only t))
               (insert "## you · 10:00\nPersistent query\n"))
-            (kargu-session-save buf-init))
+            (kargu-test-session--save buf-init))
           ;; Kill all live chat buffers
           (dolist (b (kargu-chat-list-buffers))
             (kill-buffer b))
@@ -288,6 +316,10 @@
           ;; Call kargu-chat--buffer for this project
           (let ((chat-buf (kargu-chat--buffer proj-root)))
             (should (buffer-live-p chat-buf))
+            ;; The buffer opens at once; the newest native session restores into it.
+            (kargu-bridge-test--wait
+             (lambda () (equal (buffer-local-value 'kargu-chat--session-id chat-buf)
+                               "auto-restore-001")))
             (with-current-buffer chat-buf
               (should (equal kargu-chat--session-id "auto-restore-001"))
               (should (equal kargu-chat--session-title "Auto Restore Session"))
@@ -314,10 +346,11 @@
             (setf (kargu-history-messages) '((("role" . "user") ("content" . "To be deleted"))))
             (let ((inhibit-read-only t))
               (insert "To be deleted\n"))
-            (kargu-session-save buf))
-          (should (= (length (kargu-session-list proj-root)) 1))
-          (kargu-session-delete "del-001" proj-root)
-          (should (= (length (kargu-session-list proj-root)) 0)))
+            (kargu-test-session--save buf))
+          (should (= (length (kargu-test-session--list proj-root)) 1))
+          (should-not (cadr (kargu-test-session--await
+                             (lambda (done) (kargu-session-delete "del-001" proj-root done)))))
+          (should (= (length (kargu-test-session--list proj-root)) 0)))
       (when (buffer-live-p buf) (kill-buffer buf))
       (delete-directory temp-dir t)
       (delete-directory proj t))))
@@ -399,8 +432,8 @@
                   '((("role" . "user") ("content" . "unsaved choice"))))
             ;; Save from another buffer so note-selection does not copy the live fallback.
             (with-temp-buffer
-              (kargu-session-save buf)))
-          (let ((saved (car (kargu-session-list proj-root))))
+              (kargu-test-session--save buf)))
+          (let ((saved (car (kargu-test-session--list proj-root))))
             (should (equal (kargu-aget saved "provider") ""))
             (should (equal (kargu-aget saved "model") ""))))
       (when (buffer-live-p buf) (kill-buffer buf))
@@ -525,7 +558,7 @@
           (write-region "{corrupt" nil (expand-file-name "broken.json" dir))
           (kargu-session-storage-write
            "mismatch" proj-root '(("id" . "other-id") ("updated_at" . "2026-10-21 13:00:00")))
-          (let ((sessions (kargu-session-list proj-root)))
+          (let ((sessions (kargu-test-session--list proj-root)))
             (should (equal (mapcar (lambda (s) (kargu-aget s "id")) sessions)
                            '("session-c" "session-b" "session-a")))
             (dolist (s sessions)
@@ -539,7 +572,7 @@
                   (with-current-buffer buf
                     (kargu-chat-mode)
                     (setq-local kargu-chat--project-root proj-root)
-                    (kargu-session-load (car sessions) buf proj-root)
+                    (should-not (cadr (kargu-test-session--load (car sessions) buf proj-root)))
                     (should (equal kargu-chat--session-id "session-c"))
                     (should (= (length (kargu-history-messages)) 2))
                     (should (string-match-p "large transcript body" (buffer-string))))

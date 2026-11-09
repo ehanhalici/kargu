@@ -77,7 +77,12 @@ struct PersistenceDeleteParams {
 struct PersistenceImportParams {
     scope: ReadScope,
     storage: crate::persistence::StorageLocation,
-    source_payload: Value,
+    /// A caller-supplied payload; exclusive with `source`.
+    #[serde(default)]
+    source_payload: Option<Value>,
+    /// Another storage location the worker reads the session from.
+    #[serde(default)]
+    source: Option<crate::persistence::StorageLocation>,
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
@@ -975,13 +980,23 @@ impl Host {
                 .map_err(|_| Fault::params())?,
         };
         let collision = parse_collision_policy(args.collision.as_deref(), &session_id)?;
-        let raw_payload = RawSessionPayload::try_from(match &args.source_payload {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        })
-        .map_err(|_| Fault::params())?;
-        let candidate = migrate_candidate(&raw_payload, &collision).map_err(|_| Fault::params())?;
-        let work = PersistenceWork::Import(ImportTask::new(storage_root, Box::new(candidate)));
+        let task = match (args.source_payload, args.source) {
+            (Some(payload), None) => {
+                let raw_payload = RawSessionPayload::try_from(match payload {
+                    Value::String(s) => s,
+                    other => other.to_string(),
+                })
+                .map_err(|_| Fault::params())?;
+                let candidate =
+                    migrate_candidate(&raw_payload, &collision).map_err(|_| Fault::params())?;
+                ImportTask::new(storage_root, Box::new(candidate))
+            }
+            (None, Some(source)) => {
+                ImportTask::from_location(storage_root, source, (session_id, collision))
+            }
+            _ => return Err(Fault::params()),
+        };
+        let work = PersistenceWork::Import(task);
         Ok((args.scope, work))
     }
 

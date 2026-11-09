@@ -125,10 +125,17 @@ impl SessionStorage {
     pub fn list_sessions(&self) -> Result<SessionListResult, CoreError> {
         validate_dir(self.root.path())?;
         let ids = collect_session_ids(self.root.path())?;
+        let mut infos = collect_session_file_infos(self.root.path(), &ids);
+        // Newest files are read first so a truncated listing keeps the recent ones.
+        infos.sort_by(|a, b| {
+            b.mtime_secs
+                .cmp(&a.mtime_secs)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         let mut summaries = Vec::new();
         let mut truncation = ListTruncation::Complete;
         let mut total_bytes: usize = 0;
-        for id in ids {
+        for id in infos.into_iter().map(|info| info.id) {
             if summaries.len() >= limits::SESSION_LIST_MAX_FILES
                 || total_bytes >= limits::SESSION_LIST_MAX_TOTAL_BYTES
             {
@@ -140,6 +147,7 @@ impl SessionStorage {
                 summaries.push(SessionSummary::from_record(&rec));
             }
         }
+        summaries.sort_by(newest_summary_first);
         Ok(SessionListResult::new(summaries, truncation))
     }
 
@@ -321,6 +329,14 @@ fn write_atomic_snapshot(dir: &Path, target: &Path, data: &[u8]) -> Result<(), C
     let dir_file = File::open(dir)?;
     dir_file.sync_all()?;
     Ok(())
+}
+
+/// Most recently updated first; identical timestamps order by descending id.
+fn newest_summary_first(a: &SessionSummary, b: &SessionSummary) -> std::cmp::Ordering {
+    let newer = b.updated_at().map(|t| t.as_str());
+    newer
+        .cmp(&a.updated_at().map(|t| t.as_str()))
+        .then_with(|| b.id().cmp(a.id()))
 }
 
 fn collect_session_ids(dir: &Path) -> Result<BTreeSet<StorageSessionId>, CoreError> {

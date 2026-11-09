@@ -270,20 +270,46 @@ Reuse the current buffer when it already belongs to the project."
         (kargu-chat--create-project-buffer root))))
 
 (defun kargu-chat--create-project-buffer (root)
-  "Create or restore a chat buffer for project ROOT."
-  (let* ((sessions (and kargu-session-auto-restore (kargu-session-list root)))
-         (existing (get-buffer kargu-chat-buffer-name))
+  "Create a chat buffer for project ROOT and restore its newest session.
+The buffer opens at once; the newest native session, when auto-restore
+is on, is fetched asynchronously and restored only while the buffer is
+still the untouched chat it was created as."
+  (let* ((existing (get-buffer kargu-chat-buffer-name))
          (other-root (and existing
                           (buffer-local-value 'kargu-chat--project-root existing)))
          (buffer (if (and other-root (not (equal other-root root)))
                      (generate-new-buffer kargu-chat-buffer-name)
                    (get-buffer-create kargu-chat-buffer-name))))
     (with-current-buffer buffer
-      (if sessions
-          (kargu-session-load (car sessions) buffer root)
-        (kargu-chat--initialize-project-buffer root))
-      (kargu-chat-check-and-display-missing-tools root))
+      (kargu-chat--initialize-project-buffer root)
+      (kargu-chat-check-and-display-missing-tools root)
+      (when kargu-session-auto-restore
+        (kargu-chat--restore-newest buffer root)))
     buffer))
+
+(defun kargu-chat--restore-newest (buffer root)
+  "Restore ROOT's newest native session into BUFFER if it is still untouched."
+  (let ((tick (buffer-chars-modified-tick buffer))
+        (session (with-current-buffer buffer kargu-chat--session-id)))
+    (kargu-session-list-async
+     root
+     (lambda (sessions error)
+       (cond
+        (error (kargu-log 'warn "Session auto-restore unavailable: %s" error))
+        ((and sessions (buffer-live-p buffer)
+              (= tick (buffer-chars-modified-tick buffer))
+              (equal session (buffer-local-value 'kargu-chat--session-id buffer))
+              (not (kargu-loop-running-p buffer)))
+         (with-current-buffer buffer
+           (condition-case err
+               (kargu-session-load (car sessions) buffer root
+                                   :callback (lambda (_buffer failure)
+                                               (when failure
+                                                 (kargu-log 'warn "Session auto-restore failed: %s"
+                                                            failure))))
+             (error (kargu-log 'warn "Session auto-restore failed: %s"
+                               (error-message-string err))))))))
+     buffer)))
 
 (defun kargu-chat--initialize-project-buffer (root)
   "Initialize the current chat buffer for project ROOT."

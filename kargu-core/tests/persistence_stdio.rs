@@ -944,3 +944,59 @@ fn storage_directory_is_derived_natively_never_named_by_the_request() -> TestRes
     );
     Ok(())
 }
+
+#[test]
+fn import_reads_a_local_legacy_session_natively_and_keeps_the_source() -> TestResult {
+    use std::os::unix::fs::PermissionsExt;
+    let project = tempfile::tempdir()?;
+    let data = tempfile::tempdir()?;
+    let project_str = project.path().to_str().ok_or("invalid path")?;
+    let local = project.path().join(".kargu/sessions");
+    std::fs::create_dir_all(&local)?;
+    let source = local.join("migration-legacy.json");
+    std::fs::write(&source, include_str!("fixtures/session-legacy.json"))?;
+    // Files from the legacy editor writer may predate private modes.
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644))?;
+    let central = json!({"location": "central", "project_root": project_str,
+                         "xdg_data_home": data.path()});
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+
+    for (id, params) in [
+        (
+            60,
+            json!({"scope": scope, "session_id": "migration-legacy", "storage": central,
+                    "collision": "override"}),
+        ),
+        (
+            61,
+            json!({"scope": scope, "session_id": "migration-legacy", "storage": central,
+                    "source": project_storage(project_str), "source_payload": "{}",
+                    "collision": "override"}),
+        ),
+    ] {
+        peer.send(
+            json!({"jsonrpc": "2.0", "id": id, "method": "session/import", "params": params}),
+        )?;
+        assert_eq!(peer.read()?["error"]["data"]["status"], "invalid_params");
+    }
+
+    peer.send(json!({
+        "jsonrpc": "2.0", "id": 62, "method": "session/import",
+        "params": {"scope": scope, "session_id": "migration-legacy", "storage": central,
+                   "source": project_storage(project_str), "collision": "override"}
+    }))?;
+    let reply = peer.read()?;
+    assert_eq!(reply["result"]["session_id"], "migration-legacy");
+    assert!(source.is_file(), "the local source is retained");
+
+    peer.send(json!({
+        "jsonrpc": "2.0", "id": 63, "method": "session/load",
+        "params": {"scope": scope, "session_id": "migration-legacy", "storage": central}
+    }))?;
+    let loaded = peer.read()?;
+    assert_eq!(loaded["result"]["record"]["schema_version"], 2);
+    assert_eq!(loaded["result"]["record"]["tokens_in"], 12);
+    Ok(())
+}

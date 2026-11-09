@@ -13,6 +13,7 @@
 (require 'kargu/chat)
 (require 'kargu/chat/session)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 
 (declare-function kargu-chat-mode "kargu/chat" ())
 
@@ -114,7 +115,12 @@
       (kargu-session-storage-write "safe" repo '(("id" . "other")))
       (with-temp-buffer
         (insert "keep my draft")
-        (should-error (kargu-session-load "safe" (current-buffer) repo) :type 'user-error)
+        (let (reply)
+          (kargu-session-load "safe" (current-buffer) repo
+                              :callback (lambda (buffer error) (setq reply (list buffer error))))
+          (kargu-bridge-test--wait (lambda () reply))
+          (should-not (car reply))
+          (should (cadr reply)))
         (should (equal (buffer-string) "keep my draft"))))))
 
 (ert-deftest kargu-session-load-clears-stale-buffer-selection-test ()

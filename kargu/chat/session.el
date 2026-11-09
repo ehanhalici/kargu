@@ -251,7 +251,7 @@ Native persistence owns the write; there is no local synchronous fallback."
                                   "session_id" sid
                                   "storage" (kargu-session--native-storage root)
                                   "expected_revision" expected
-                                  "record" data)))
+                                  "record" (kargu-json-record-wire data))))
                      (kargu-bridge-session-save
                       connection params
                       (lambda (result save-err)
@@ -277,14 +277,16 @@ Native persistence owns the write; there is no local synchronous fallback."
                         (expand-file-name (eval standard t))))
       (directory-file-name (expand-file-name kargu-sessions-directory)))))
 
-(defun kargu-session--native-storage (root)
+(defun kargu-session--native-storage (root &optional location)
   "Return the native storage choice for project ROOT.
-Only the location choice, raw editor facts and an explicitly customized
-central directory are sent; Rust derives the session directory and its
-project key, so no request names the directory it writes."
-  (let ((central (eq kargu-session-storage-location 'central)))
+LOCATION overrides `kargu-session-storage-location'.  Only the location
+choice, raw editor facts and an explicitly customized central directory
+are sent; Rust derives the session directory and its project key, so no
+request names the directory it writes."
+  (let* ((location (or location kargu-session-storage-location))
+         (central (eq location 'central)))
     (kargu-bridge--object
-     "location" (pcase kargu-session-storage-location
+     "location" (pcase location
                   ('central "central")
                   ('project "project")
                   (_ (user-error "Kargu: invalid session storage location")))
@@ -390,77 +392,121 @@ Uses UPDATED-AT and MESSAGE-COUNT for status banner."
     (insert (concat "kargu chat — type at the prompt; "
                     "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n"))))
 
-(defun kargu-session--read-by-id (session-id root)
-  "Read full session record for SESSION-ID in project ROOT."
-  (let ((data (kargu-session-storage-read session-id root)))
-    (when (and data (not (equal (kargu-aget data "id") session-id)))
-      (user-error "Kargu: session ID does not match its filename"))
-    data))
+(defun kargu-session--native-call (origin method params callback)
+  "Send persistence METHOD with PARAMS for ORIGIN's scope.
+PARAMS is a function of the native scope returning the request object.
+CALLBACK receives (RESULT ERROR) with ERROR a short string."
+  (kargu-bridge-session-scope
+   origin
+   (lambda (connection scope failure)
+     (if failure
+         (funcall callback nil (format "Native persistence unavailable: %s" failure))
+       (funcall method connection (funcall params scope)
+                (lambda (result error)
+                  (if error
+                      (funcall callback nil (format "%s" error))
+                    (funcall callback result nil))))))))
 
-(defun kargu-session--read-data (session-or-id root)
-  "Read SESSION-OR-ID in project ROOT, or return supplied full session data."
-  (cond
-   ((kargu-session-metadata-p session-or-id)
-    (kargu-session--read-by-id (kargu-aget session-or-id "id") root))
-   ((or (consp session-or-id) (hash-table-p session-or-id))
-    session-or-id)
-   (t (kargu-session--read-by-id session-or-id root))))
+(defun kargu-session--native-load (session-id root callback)
+  "Fetch SESSION-ID's record for project ROOT from native persistence.
+CALLBACK receives (RECORD ERROR); the record never comes from a local read."
+  (kargu-session-storage--assert-id session-id)
+  (kargu-session--native-call
+   nil #'kargu-bridge-session-load
+   (lambda (scope)
+     (kargu-bridge--object "scope" scope "session_id" session-id
+                           "storage" (kargu-session--native-storage root)))
+   (lambda (reply error)
+     (let ((record (and (hash-table-p reply) (gethash "record" reply))))
+       (cond
+        (error (funcall callback nil (format "Session load failed: %s" error)))
+        ((not (hash-table-p record)) (funcall callback nil "Session not found"))
+        ((not (equal (gethash "id" record) session-id))
+         (funcall callback nil "Session record does not match its identifier"))
+        (t (funcall callback record nil)))))))
+
+(defun kargu-session--restore-data (raw target-buffer root callback)
+  "Validate RAW and restore it into TARGET-BUFFER for ROOT, then CALLBACK."
+  (let* ((data (kargu-session-validate raw))
+         (_id (kargu-session-storage--assert-id (kargu-aget data "id")))
+         (buf (kargu-chat-restore-target root target-buffer)))
+    (kargu-session-restore :data data :target buf :root root :callback callback)))
 
 (cl-defun kargu-session-load (session-or-id &optional target-buffer root &key callback)
   "Restore SESSION-OR-ID into TARGET-BUFFER for project ROOT natively.
-SESSION-OR-ID may be a session alist or a session id string.
-ROOT is authoritative; metadata cannot switch projects.  An active run
-must finish before loading another session.  CALLBACK receives (BUFFER ERROR).
+SESSION-OR-ID is full session data, listing metadata or an id string;
+metadata and ids are fetched through native persistence.  ROOT is
+authoritative; metadata cannot switch projects.  An active run must
+finish before loading another session.  CALLBACK receives (BUFFER ERROR).
 Return the buffer on immediate success, or an owned task while preparing."
   (when callback (kargu-contract-assert #'functionp callback))
   (kargu-selection-require-idle)
-  (let* ((root (kargu-session-project-root (or root target-buffer)))
-         (raw (kargu-session--read-data session-or-id root))
-         (data (and raw (kargu-session-validate raw)))
-         (_validated (when data (kargu-session-storage-file (kargu-aget data "id") root)))
-         (buf (and data (kargu-chat-restore-target root target-buffer))))
-    (when data
-      (kargu-session-restore :data data :target buf :root root :callback callback))))
+  (let ((root (kargu-session-project-root (or root target-buffer))))
+    (if (and (or (consp session-or-id) (hash-table-p session-or-id))
+             (not (kargu-session-metadata-p session-or-id)))
+        (kargu-session--restore-data session-or-id target-buffer root callback)
+      (let* ((session-id (if (stringp session-or-id) session-or-id
+                           (kargu-aget session-or-id "id")))
+             (report (lambda (buffer error)
+                       (cond (callback (funcall callback buffer error))
+                             (error (message "Kargu: %s" error)))))
+             (task (kargu-async-start report)))
+        (kargu-session--native-load
+         session-id root
+         (lambda (record error)
+           (when (kargu-async-pending-p task)
+             (if error
+                 (kargu-async-finish task nil error)
+               (condition-case err
+                   (kargu-session--restore-data
+                    record target-buffer root
+                    (lambda (buffer failure) (kargu-async-finish task buffer failure)))
+                 (error (kargu-async-finish task nil (error-message-string err))))))))
+        task))))
+
+(defun kargu-session--choose (root prompt callback)
+  "List ROOT's sessions natively, read one with PROMPT, then CALLBACK its id."
+  (kargu-session-list-async
+   root
+   (lambda (sessions error)
+     (cond
+      (error (message "Kargu: %s" error))
+      ((null sessions) (message "kargu: no saved sessions for %s" root))
+      (t (let* ((choices (mapcar (lambda (s)
+                                   (cons (format "%s (%s - %s)"
+                                                 (or (kargu-aget s "title") "Untitled")
+                                                 (or (kargu-aget s "updated_at") "")
+                                                 (or (kargu-aget s "id") ""))
+                                         (kargu-aget s "id")))
+                                 sessions))
+                (choice (completing-read prompt choices nil t)))
+           (funcall callback (cdr (assoc choice choices)))))))
+   (and (derived-mode-p 'kargu-chat-mode) (current-buffer))))
 
 (defun kargu-session-delete (session-id &optional root callback)
-  "Delete saved SESSION-ID from disk for project ROOT via native persistence."
-  (interactive
-   (let* ((proj (kargu-session-project-root))
-          (sessions (kargu-session-list proj))
-          (choices (mapcar (lambda (s)
-                             (cons (format "%s (%s - %s)"
-                                           (or (kargu-aget s "title") "Untitled")
-                                           (or (kargu-aget s "updated_at") "")
-                                           (or (kargu-aget s "id") ""))
-                                   (kargu-aget s "id")))
-                           sessions))
-          (choice (completing-read "Delete kargu session: " choices nil t)))
-     (list (cdr (assoc choice choices)) proj)))
-  (when (and (stringp session-id) (not (string-empty-p session-id)))
-    (let* ((canonical (kargu-session-project-root root))
-           (file (kargu-session-storage-file session-id canonical)))
-      (kargu-bridge-session-scope
-       nil
-       (lambda (connection scope failure)
-         (if (and connection (not failure))
-             (let ((params (kargu-bridge--object
-                            "scope" scope
-                            "session_id" session-id
-                            "storage" (kargu-session--native-storage canonical))))
-               (kargu-bridge-session-delete
-                connection params
-                (lambda (result err)
-                  (if err
-                      (let ((msg (format "Delete failed: %s" err)))
-                        (if callback (funcall callback nil msg) (message "kargu: %s" msg)))
-                    (message "kargu: deleted session %s" session-id)
-                    (when callback (funcall callback result nil))))))
-           (if (file-exists-p file)
-               (progn
-                 (delete-file file)
-                 (message "kargu: deleted session %s" session-id)
-                 (when callback (funcall callback t nil)))
-             (when callback (funcall callback nil "File not found")))))))))
+  "Delete saved SESSION-ID for project ROOT through native persistence.
+Interactively, choose from the native listing.  CALLBACK receives
+\(RESULT ERROR).  There is no local fallback writer: when native
+persistence is unavailable the session stays on disk and the error is
+reported."
+  (interactive (list nil))
+  (let ((canonical (kargu-session-project-root root)))
+    (if (null session-id)
+        (kargu-session--choose
+         canonical "Delete kargu session: "
+         (lambda (chosen) (when chosen (kargu-session-delete chosen canonical callback))))
+      (kargu-session-storage--assert-id session-id)
+      (kargu-session--native-call
+       nil #'kargu-bridge-session-delete
+       (lambda (scope)
+         (kargu-bridge--object "scope" scope "session_id" session-id
+                               "storage" (kargu-session--native-storage canonical)))
+       (lambda (result error)
+         (if error
+             (let ((msg (format "Delete failed: %s" error)))
+               (if callback (funcall callback nil msg) (message "kargu: %s" msg)))
+           (message "kargu: deleted session %s" session-id)
+           (when callback (funcall callback result nil))))))))
 
 (defun kargu-session--choice-entry (session)
   "Return (LABEL . SESSION) pair for `completing-read' from metadata SESSION."
@@ -518,41 +564,32 @@ Return the buffer on immediate success, or an owned task while preparing."
 
 (defun kargu-session-import-local (session-id &optional root callback)
   "Copy local SESSION-ID from ROOT to central storage via native persistence.
-Existing central records are never overwritten.  ROOT defaults to the
-current chat's project, not any project named by session metadata."
+Rust reads the project-local source, migrates it and writes the central
+record; the source is retained and existing central records are never
+overwritten.  ROOT defaults to the current chat's project, not any
+project named by session metadata.  CALLBACK receives (RESULT ERROR)."
   (interactive
    (let* ((root (kargu-session-project-root))
           (ids (kargu-session-storage-local-ids root)))
      (unless ids (user-error "Kargu: no safe local session files found"))
      (list (completing-read "Import local session: " ids nil t) root)))
-  (let* ((proj-root (kargu-session-project-root root))
-         (local-file (kargu-session-storage-file session-id (kargu-session-storage--local-directory proj-root)))
-         (payload (when (file-readable-p local-file)
-                    (with-temp-buffer
-                      (insert-file-contents-literally local-file)
-                      (buffer-string)))))
-    (unless payload
-      (user-error "Kargu: local session file not found or not readable: %s" session-id))
-    (kargu-bridge-session-scope
-     nil
-     (lambda (connection scope failure)
-       (if failure
-           (let ((err (format "Native bridge unavailable for import: %s" failure)))
-             (if callback (funcall callback nil err) (user-error "%s" err)))
-         (let ((params (kargu-bridge--object
-                        "scope" scope
-                        "session_id" session-id
-                        "storage" (kargu-session--native-storage proj-root)
-                        "source_payload" payload
-                        "collision" "override")))
-           (kargu-bridge-session-import
-            connection params
-            (lambda (result err)
-              (if err
-                  (let ((msg (format "Import failed: %s" err)))
-                    (if callback (funcall callback nil msg) (message "kargu: %s" msg)))
-                (message "Kargu: imported %s; the local source was retained" session-id)
-                (when callback (funcall callback result nil)))))))))))
+  (kargu-session-storage--assert-id session-id)
+  (let ((proj-root (kargu-session-project-root root)))
+    (kargu-session--native-call
+     nil #'kargu-bridge-session-import
+     (lambda (scope)
+       (kargu-bridge--object
+        "scope" scope
+        "session_id" session-id
+        "storage" (kargu-session--native-storage proj-root 'central)
+        "source" (kargu-session--native-storage proj-root 'project)
+        "collision" "override"))
+     (lambda (result error)
+       (if error
+           (let ((msg (format "Import failed: %s" error)))
+             (if callback (funcall callback nil msg) (message "kargu: %s" msg)))
+         (message "Kargu: imported %s; the local source was retained" session-id)
+         (when callback (funcall callback result nil)))))))
 
 (add-hook 'kill-emacs-hook #'kargu-session-auto-save-all)
 

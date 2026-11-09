@@ -5128,6 +5128,53 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Denetim (2026-11-09) — yeniden açıldı:** Auto-save debounce, storage dizini politikası ve `kargu-session-list` (eski `kargu-session-storage-list-metadata`) hâlâ Elisp'te; ölçüt bunların Rust'ta olmasını istiyor. 7.5a sonrası: dizin türetme Rust'ta. Hâlâ açık: save record'u Elisp history/transcript'ten kuruluyor (native history snapshot değil); delete, bridge yoksa yerel `delete-file`'a düşüyor (ikinci writer); import kaynak dosyayı Elisp okuyor.
 
+      - [x] **7.5c1 Native UI CRUD yolu (2026-11-09):** Public load/list/picker/
+        delete/import/auto-restore yalnız native RPC kullanıyor; yerel okuyucu ya da
+        fallback writer kalmadı.
+        - **Kritik düzeltme:** Save gerçek core'a hiç ulaşmıyordu. `record` string
+          anahtarlı bir alist'ti ve `json-serialize` istek kodlanırken `send_failed`
+          ile düşüyordu. ERT mock'ları bu hatayı gizliyordu. Kayıt artık
+          `kargu-json-record-wire` ile typed wire'a çevriliyor.
+        - **Veri kaybı:** `SessionRecord` şu alanları sessizce düşürüyordu:
+          `tokens_spent`, `tokens_unknown`, `monetary_spent`, `monetary_reserved`,
+          `monetary_unknown`. Artık typed ve sınırlı alanlar olarak saklanıyor.
+          `SessionMonetaryAmount` JSON sayısını yazıldığı biçimde koruyor; tamsayı
+          `0` geri `0.0` olarak dönüp Elisp kontratını kırmıyor.
+        - **Sıralama:** Native list oturumları ad sırasıyla döndürüyordu. Artık önce
+          mtime, sonra `updated_at` azalan, eşitlikte id azalan; truncation en
+          yenileri tutuyor.
+        - **Load:** Kayıt native `session/load` ile geliyor ve id eşliği
+          doğrulanıyor.
+        - **Delete:** Bridge yoksa yapılan yerel `delete-file` kaldırıldı;
+          interaktif seçim native listeden.
+        - **Import:** Kaynak dosyayı Rust worker okuyor:
+          `source` = proje konumu, `recovery::read_import_source`. Kaynak 0644
+          olabilir; sahiplik ve sınır zorunlu. Hedef her zaman central.
+        - **Auto-restore:** Chat tamponu hemen açılıyor; en yeni native oturum async
+          olarak, yalnız tampon hâlâ dokunulmamışsa geri yükleniyor.
+        - **Test izolasyonu:** `kargu-sessions-directory` scratch'e bağlandı,
+          auto-restore varsayılan olarak kapalı.
+        - **Kanıt:** Session ERT testleri artık mock yerine gerçek core'a karşı
+          çalışıyor. `persistence_stdio`
+          `import_reads_a_local_legacy_session_natively_and_keeps_the_source`;
+          Rust `listing_is_newest_first_with_descending_id_ties` ve
+          `editor_accounting_fields_survive_a_save_round_trip`; ERT
+          `kargu-session-save-and-load-test` (diskte muhasebe alanları ve legacy
+          yol eşliği).
+
+      - [ ] **7.5c2 Native kayıt kaynağı ve auto-save:** Bu iş 5.1b'yi bekliyor:
+        legacy run'larda history hâlâ Elisp'te ve native history otoriter değil.
+        - Save record'u Elisp history ve tamponundan kuruluyor; native history
+          snapshot'ından kurulmalı. Transcript yalnız UI sunumu olarak Emacs'ten
+          gelebilir.
+        - Auto-save debounce zamanlayıcısı Elisp'te; Rust'a taşınmalı.
+        - `kill-emacs-hook` async save başlatıyor ama Emacs çıkarken bu yazım
+          tamamlanmıyor. Native flush/drain gerekiyor.
+        - Import seçicisi yerel id'leri hâlâ Elisp dosya adı taramasıyla
+          listeliyor; native project listesine geçmeli.
+
+        **Önkoşul:** 5.1b; 7.5c1.
+
     - [x] **7.5d Fixture kabulü:** gerçek geçici disk + pipe'ta CRUD/import/restart,
       iki owner, stale revision, reply kaybı ve UI origin close'u çalıştır;
       gerçek kullanıcı session/config dosyasını veya secret'ını kullanma.

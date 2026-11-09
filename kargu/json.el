@@ -163,6 +163,25 @@ Arbitrary nested array data must already use vectors."
                         (kargu-json--record-value value (1+ depth))) object)))
      (t object))))
 
+(defun kargu-json-record-wire (record)
+  "Return native agent RECORD as typed wire hash tables and vectors.
+A nil value becomes JSON null, never an empty object, so the native
+schema sees absent counts as null rather than a malformed object."
+  (kargu-json--nil-to-null (kargu-json--record-value record 0)))
+
+(defun kargu-json--nil-to-null (value)
+  "Replace nil leaves of wire VALUE with `:json-null' in place."
+  (cond
+   ((null value) :json-null)
+   ((hash-table-p value)
+    (maphash (lambda (key child) (puthash key (kargu-json--nil-to-null child) value)) value)
+    value)
+   ((vectorp value)
+    (dotimes (index (length value))
+      (aset value index (kargu-json--nil-to-null (aref value index))))
+    value)
+   (t value)))
+
 (defun kargu-json-encode-record (record)
   "Encode native agent RECORD through the explicit alist adapter.
 Use `kargu--json-encode' for typed wire data, not this adapter.

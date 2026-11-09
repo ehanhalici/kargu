@@ -15,10 +15,10 @@ pub use domain::{
     PersistedToolCallId, PersistedToolFunction, PersistedToolKind, PersistedToolName,
     PersistenceError, PrunedByteCount, PrunedSessionCount, ReasoningContent, RetainedSessionCount,
     RetentionReport, SessionEffort, SessionListResult, SessionMessage, SessionMessageCount,
-    SessionMode, SessionModel, SessionProjectName, SessionProvider, SessionRecord,
-    SessionRepairCount, SessionRetentionPolicy, SessionSummary, SessionTimestamp, SessionTitle,
-    SessionTranscript, StorageRevision, StorageRoot, StorageSchemaVersion, StorageSequence,
-    StorageSessionId,
+    SessionMode, SessionModel, SessionMonetaryAmount, SessionProjectName, SessionProvider,
+    SessionRecord, SessionRepairCount, SessionRetentionPolicy, SessionSummary, SessionTimestamp,
+    SessionTitle, SessionTranscript, StorageRevision, StorageRoot, StorageSchemaVersion,
+    StorageSequence, StorageSessionId,
 };
 
 pub use journal::{

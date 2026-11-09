@@ -11,6 +11,7 @@
 
 (require 'ert)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 (require 'kargu/chat)
 (require 'kargu/chat/session)
 (require 'kargu/chat/routing)
@@ -22,8 +23,8 @@
     (let (target)
       (cl-letf (((symbol-function 'kargu-session-list-async)
                  (lambda (_root callback) (funcall callback (list data) nil)))
-                ((symbol-function 'kargu-session--read-by-id)
-                 (lambda (_id _root) data))
+                ((symbol-function 'kargu-session--native-load)
+                 (lambda (_id _root callback) (funcall callback data nil)))
                 ((symbol-function 'completing-read) (lambda (_prompt choices &rest _) (caar choices)))
                 ((symbol-function 'pop-to-buffer-same-window) (lambda (buffer &rest _) (setq target buffer))))
         (kargu-chat-sessions root))
@@ -94,9 +95,13 @@
 
 (ert-deftest kargu-session-routing-absent-record-does-not-create-a-buffer-test ()
   "A missing session has no target-allocation side effect."
-  (let ((before (buffer-list)))
-    (should-not (kargu-session-load "missing-record" nil default-directory))
-    (should (equal before (buffer-list)))))
+  (let ((before (kargu-chat-list-buffers)) reply)
+    (kargu-session-load "missing-record" nil default-directory
+                        :callback (lambda (buffer error) (setq reply (list buffer error))))
+    (kargu-bridge-test--wait (lambda () reply))
+    (should-not (car reply))
+    (should (cadr reply))
+    (should (equal before (kargu-chat-list-buffers)))))
 
 (ert-deftest kargu-session-routing-two-chats-same-project-distinct-handles-and-sessions-test ()
   "Two chats in the same project hold distinct handles, sessions, and run states."
