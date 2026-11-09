@@ -130,9 +130,9 @@ impl ExecuteInput {
         if self.mode != Mode::Agent {
             return Err(CoreError::Rejected);
         }
-        validate_path(&self.root)?;
+        crate::domain::check_path(&self.root)?;
         let cwd = self.cwd.as_deref().unwrap_or(Path::new("."));
-        validate_path(cwd)?;
+        crate::domain::check_path(cwd)?;
         if !self.root.is_absolute() {
             return Err(CoreError::Rejected);
         }
@@ -205,5 +205,3 @@ impl ExecuteInput {
         })
     }
 }
-
-pub(crate) use crate::domain::check_path as validate_path;

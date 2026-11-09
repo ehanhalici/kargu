@@ -392,14 +392,18 @@ fn configuration_candidates(
     match (paths, locations) {
         (Some(paths), None) => Ok(paths),
         (None, Some(locations)) => {
-            let absolute =
-                |value: Option<String>| value.map(PathBuf::from).filter(|path| path.is_absolute());
+            let absolute = |value: Option<String>| {
+                value
+                    .map(PathBuf::from)
+                    .filter(|path| path.is_absolute() && crate::domain::check_path(path).is_ok())
+            };
             let base = absolute(locations.xdg_config_home)
                 .or_else(|| absolute(locations.home).map(|home| home.join(".config")))
                 .ok_or_else(invalid)?;
+            let emacs = absolute(Some(locations.user_emacs_directory)).ok_or_else(invalid)?;
             [
                 base.join("kargu").join("config.toml"),
-                PathBuf::from(locations.user_emacs_directory).join("kargu.toml"),
+                emacs.join("kargu.toml"),
             ]
             .into_iter()
             .map(|path| {

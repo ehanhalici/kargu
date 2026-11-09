@@ -102,7 +102,7 @@
     (kargu-test-set-model-prop "shared" "context-window" 50 :provider "a")
     (kargu-test-set-model-metadata "vendor/shared" '(("context_length" . 30)) "a")
     (should (= (kargu-model-context-window "vendor/shared" "a") 50))
-    (should (= (length (gethash "records" (kargu-model-projection--view))) 1))
+    (should (= (length (gethash "records" (kargu-model-projection-view))) 1))
     (should-error (kargu-test-set-model-prop "vendor/shared" "provider" "b" :provider "a")
                   :type 'user-error)))
 

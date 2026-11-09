@@ -17,7 +17,7 @@
 
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 
-(defun kargu-model-store--provider (provider)
+(defun kargu-model-store-provider (provider)
   "Encode explicit PROVIDER for its native identity boundary."
   (unless (and provider (or (stringp provider) (symbolp provider)))
     (user-error "Kargu: model metadata requires a provider"))
@@ -30,7 +30,7 @@
 (cl-defun kargu-model-store-submit (provider command &optional callback &key owner valid-p)
   "Capture COMMAND for PROVIDER and return its native publication ticket.
 CALLBACK receives (VIEW FAILURE) once.  OWNER and VALID-P guard the producer."
-  (let* ((provider (kargu-model-store--provider provider))
+  (let* ((provider (kargu-model-store-provider provider))
          (specs (and (fboundp 'kargu-provider-effort-specs) (kargu-provider-effort-specs provider))))
     (kargu-bridge-models-publish
      (kargu-application-context) provider (kargu-model-encode-command command)
@@ -41,16 +41,16 @@ CALLBACK receives (VIEW FAILURE) once.  OWNER and VALID-P guard the producer."
 (cl-defun kargu-model-store-get (provider id &key exact)
   "Detach ID's last committed metadata under PROVIDER; EXACT refuses aliases."
   (when (and (stringp id) (not (string-empty-p (string-trim id))))
-    (when-let* ((entry (kargu-model-projection--entry
-                        (kargu-model-projection--view) (kargu-model-store--provider provider)
+    (when-let* ((entry (kargu-model-projection-entry
+                        (kargu-model-projection-view) (kargu-model-store-provider provider)
                         (string-trim id) exact)))
       (kargu-json-to-record (kargu-bridge-models-copy (gethash "metadata" entry))))))
 
 (defun kargu-model-store-settings (provider id &optional view omit-metadata)
   "Detach PROVIDER/ID's fields from immutable VIEW or its UI observation.
 OMIT-METADATA avoids copying inspector text in frequently read UI fields."
-  (kargu-model-projection-connection (or view (kargu-model-projection--view))
-                                     (kargu-model-store--provider provider) id omit-metadata))
+  (kargu-model-projection-connection (or view (kargu-model-projection-view))
+                                     (kargu-model-store-provider provider) id omit-metadata))
 
 (defun kargu-model-store-put (provider id data &optional callback)
   "Capture DATA for PROVIDER's ID; CALLBACK receives (VIEW FAILURE)."

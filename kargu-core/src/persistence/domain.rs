@@ -128,9 +128,9 @@ impl TryFrom<PathBuf> for StorageRoot {
     type Error = PersistenceError;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        if !path.is_absolute() {
+        if !path.is_absolute() || crate::domain::check_path(&path).is_err() {
             return Err(PersistenceError::Validation(
-                "storage root must be an absolute path",
+                "storage root must be a bounded absolute path",
             ));
         }
         Ok(Self(path))

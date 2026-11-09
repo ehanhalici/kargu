@@ -27,7 +27,7 @@
     cell)
   "Private native unknown-model projection, checked against Rust by its tests.")
 
-(defun kargu-model-projection--view (&optional application)
+(defun kargu-model-projection-view (&optional application)
   "Borrow APPLICATION's last committed UI view, or the native offline bootstrap.
 This internal reader does not authorize a connection, start a core or repair
 an uncertain lease.  External callers must receive detached selected fields."
@@ -52,7 +52,7 @@ Indexes contain only supplied DTO identities, never inferred aliases/policy."
                         (puthash key index indexes)))))
       (gethash (cons provider id) index))))
 
-(defun kargu-model-projection--entry (view provider model &optional exact)
+(defun kargu-model-projection-entry (view provider model &optional exact)
   "Borrow VIEW's canonical PROVIDER/MODEL entry; EXACT refuses display aliases."
   (let ((records (gethash "records" view)))
     (or (kargu-model-projection--find records provider model "id")
@@ -83,8 +83,8 @@ Display aliases may select metadata.  Request parameters require exact IDs.
 OMIT-METADATA skips copying large inspector text for UI field reads."
   (let* ((provider (downcase (string-trim provider)))
          (model (string-trim (or model "")))
-         (exact (kargu-model-projection--entry view provider model t))
-         (entry (or exact (kargu-model-projection--entry view provider model)))
+         (exact (kargu-model-projection-entry view provider model t))
+         (entry (or exact (kargu-model-projection-entry view provider model)))
          (defaults (gethash "defaults" view))
          (refusal (kargu-model-projection--find (gethash "refusals" view) provider model "id"))
          (alias (unless exact (kargu-model-projection--find (gethash "aliases" view) provider model "alias")))

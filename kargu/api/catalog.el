@@ -193,7 +193,7 @@ Provider envelopes, identity normalization and invalid records are Rust's job."
 (cl-defun kargu--catalog-cache-live-models (provider models &optional callback &key valid-p)
   "Publish MODELS atomically for PROVIDER; CALLBACK receives (VIEW FAILURE).
 The native catalog's IDs become the UI cache only after committed completion."
-  (let ((provider (kargu-model-store--provider provider)))
+  (let ((provider (kargu-model-store-provider provider)))
     (kargu-model-store-submit
      provider
      (kargu-bridge--object "operation" "replace_catalog" "catalog"

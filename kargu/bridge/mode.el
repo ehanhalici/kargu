@@ -29,7 +29,7 @@
       (error "Invalid native mode acknowledgement"))
     (cons revision
           (list :mode (intern mode-str)
-                :debug-ready (and debug-ready t)
+                :debug-ready (eq debug-ready t)
                 :available-tools (if (vectorp tools) (append tools nil) tools)))))
 
 (defun kargu-bridge-mode--binding (application session)
