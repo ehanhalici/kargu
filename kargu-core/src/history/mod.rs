@@ -11,6 +11,7 @@ mod store;
 mod types;
 mod upload;
 
+pub use crate::domain::ProviderCallId;
 pub use compact::{
     CompactKeep, CompactThreshold, PreservedTail, SummaryCandidate, SummaryText, TailHash,
     build_compacted_history, compaction_prompt_message,
@@ -18,7 +19,7 @@ pub use compact::{
 pub use message::{Message, ProviderCall, Role};
 pub(crate) use rpc::fault;
 pub use store::{History, PendingCall, StoredMessage};
-pub use types::{HistoryBytes, HistoryRevision, ProviderCallId};
+pub use types::{HistoryBytes, HistoryRevision};
 pub(crate) use upload::{HistoryImports, HistoryWork};
 
 /// Payload-free conversation protocol failures.

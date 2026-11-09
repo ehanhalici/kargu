@@ -434,8 +434,9 @@ Storage is native; tests observe it only through the public flows."
             (with-temp-buffer
               (kargu-test-session--save buf)))
           (let ((saved (car (kargu-test-session--list proj-root))))
-            (should (equal (kargu-aget saved "provider") ""))
-            (should (equal (kargu-aget saved "model") ""))))
+            ;; An unselected choice is absent, not an empty string.
+            (should-not (stringp (kargu-aget saved "provider")))
+            (should-not (stringp (kargu-aget saved "model")))))
       (when (buffer-live-p buf) (kill-buffer buf))
       (delete-directory temp-dir t)
       (delete-directory proj t))))

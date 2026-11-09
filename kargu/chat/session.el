@@ -149,6 +149,10 @@ over the current workspace."
       fallback
       "New Session"))
 
+(defun kargu-session--choice (value)
+  "Return VALUE when it is a non-blank string, else nil (absent)."
+  (and (stringp value) (not (string-blank-p value)) value))
+
 (cl-defun kargu-session--build-data
     (&key sid root title usage mode provider model effort transcript messages)
   "Build SID's record under ROOT with TITLE, USAGE, MODE and choices.
@@ -163,8 +167,9 @@ Store PROVIDER, MODEL, EFFORT, TRANSCRIPT and native MESSAGES."
                          (format-time-string "%Y-%m-%d %H:%M:%S")))
     ("updated_at" . ,(format-time-string "%Y-%m-%d %H:%M:%S"))
     ("mode" . ,(symbol-name mode))
-    ("provider" . ,(or provider ""))
-    ("model" . ,(or model ""))
+    ;; No choice is absent, never an empty string the core would have to guess about.
+    ("provider" . ,(kargu-session--choice provider))
+    ("model" . ,(kargu-session--choice model))
     ("requests" . ,(or (plist-get usage :requests-spent) (plist-get usage :requests) 0))
     ("tokens_in" . ,(plist-get usage :tokens-in))
     ("tokens_out" . ,(plist-get usage :tokens-out))
@@ -176,7 +181,6 @@ Store PROVIDER, MODEL, EFFORT, TRANSCRIPT and native MESSAGES."
     ("monetary_spent" . ,(or (plist-get usage :monetary-spent) 0))
     ("monetary_reserved" . ,(or (plist-get usage :monetary-reserved) 0))
     ("monetary_unknown" . ,(if (or (plist-get usage :monetary-unknown) (plist-get usage :monetary-unknown-p)) t :json-false))
-    ("message_count" . ,(length (or messages '())))
     ("transcript" . ,transcript)
     ("messages" . ,(vconcat (or messages '())))))
 
@@ -220,8 +224,8 @@ Native persistence owns the write; there is no local synchronous fallback."
                (mode-val (if (fboundp 'kargu-state-mode)
                              (kargu-state-mode)
                            'agent))
-               (prov (or (kargu-selection-provider) ""))
-               (mod (or (kargu-selection-model) ""))
+               (prov (kargu-selection-provider))
+               (mod (kargu-selection-model))
                (usage (kargu-session-snapshot)))
           ;; Avoid creating records for completely empty untouched sessions
           (if (not (or (and messages (> (length messages) 0))

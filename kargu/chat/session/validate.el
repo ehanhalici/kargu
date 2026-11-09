@@ -53,9 +53,10 @@ Reject circular/improper lists before the native record encoder sees them."
         (mapc visit value))))))
 
 (defun kargu-session-validate--optional (record key predicate)
-  "Check RECORD's KEY with PREDICATE when present, without echoing values."
+  "Check RECORD's KEY with PREDICATE when present, without echoing values.
+JSON null means absent, as in the core's record schema."
   (let ((value (gethash key record :kargu-missing)))
-    (unless (or (eq value :kargu-missing) (funcall predicate value))
+    (unless (or (memq value '(:kargu-missing :json-null)) (funcall predicate value))
       (user-error "Kargu: invalid session field %s" key))))
 
 (defun kargu-session-validate--object (value label)
@@ -120,7 +121,9 @@ Preserve unknown block kinds for backend adapters rather than dropping them."
     (kargu-session-validate--optional record key #'natnump))
   (kargu-session-validate--optional
    record "mode" (lambda (mode) (member mode (mapcar #'symbol-name kargu-all-modes))))
-  (kargu-session-validate--optional record "messages" #'vectorp)
+  ;; Messages may be omitted but never null: the core requires an array.
+  (unless (vectorp (gethash "messages" record []))
+    (user-error "Kargu: invalid session field messages"))
   (mapc #'kargu-session-validate--message (gethash "messages" record)))
 
 (defun kargu-session-validate (data)

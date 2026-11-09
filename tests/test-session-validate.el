@@ -32,7 +32,7 @@
       (dolist (field '(("transcript" . 12) ("messages" . "wrong")
                        ("messages" . :json-null) ("requests" . -1)
                        ("tokens_in" . 1.5) ("tokens_out" . "10")
-                       ("provider" . []) ("model" . :json-null)
+                       ("provider" . []) ("model" . 7)
                        ("title" . []) ("created_at" . 4)
                        ("updated_at" . []) ("mode" . "unknown")
                        ("messages" . [(("role" . "unknown"))])

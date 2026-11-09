@@ -8,7 +8,7 @@
 
 use crate::{
     constants::limits,
-    domain::{RequestCount, TokenCount},
+    domain::{ProviderCallId, RequestCount, TokenCount, ToolName},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -259,6 +259,7 @@ impl TryFrom<u64> for StorageSequence {
 #[derive(
     Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[serde(try_from = "u32")]
 pub struct StorageSchemaVersion(u32);
 
 impl StorageSchemaVersion {
@@ -275,7 +276,7 @@ impl TryFrom<u32> for StorageSchemaVersion {
     type Error = PersistenceError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        if value != 2 {
+        if value != Self::V2.0 {
             return Err(PersistenceError::UnsupportedVersion(value));
         }
         Ok(Self(value))
@@ -313,6 +314,7 @@ impl TryFrom<String> for SessionTranscript {
 
 /// Validated session mode identifier.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionMode(String);
 
 impl SessionMode {
@@ -343,6 +345,7 @@ impl TryFrom<&str> for SessionMode {
 
 /// Validated provider name identifier.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionProvider(String);
 
 impl SessionProvider {
@@ -373,6 +376,7 @@ impl TryFrom<&str> for SessionProvider {
 
 /// Validated model name identifier.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionModel(String);
 
 impl SessionModel {
@@ -403,6 +407,7 @@ impl TryFrom<&str> for SessionModel {
 
 /// Validated session project name.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionProjectName(String);
 
 impl SessionProjectName {
@@ -462,6 +467,7 @@ impl From<SessionMonetaryAmount> for serde_json::Number {
 
 /// Validated session title.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionTitle(String);
 
 impl SessionTitle {
@@ -492,6 +498,7 @@ impl TryFrom<&str> for SessionTitle {
 
 /// Validated session timestamp string.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionTimestamp(String);
 
 impl SessionTimestamp {
@@ -520,14 +527,15 @@ impl TryFrom<&str> for SessionTimestamp {
     }
 }
 
-/// Validated tool call identifier string.
+/// Validated tool call identifier; the rule is `domain::ProviderCallId`'s.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct PersistedToolCallId(String);
+#[serde(transparent)]
+pub struct PersistedToolCallId(ProviderCallId);
 
 impl PersistedToolCallId {
     /// Borrow the tool call identifier.
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
@@ -535,10 +543,9 @@ impl TryFrom<String> for PersistedToolCallId {
     type Error = PersistenceError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty() || value.len() > 128 {
-            return Err(PersistenceError::Validation("invalid tool call id"));
-        }
-        Ok(Self(value))
+        ProviderCallId::try_from(value)
+            .map(Self)
+            .map_err(|_| PersistenceError::Validation("invalid tool call id"))
     }
 }
 
@@ -550,14 +557,15 @@ impl TryFrom<&str> for PersistedToolCallId {
     }
 }
 
-/// Validated tool name.
+/// Validated tool name; the rule is `domain::ToolName`'s.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct PersistedToolName(String);
+#[serde(transparent)]
+pub struct PersistedToolName(ToolName);
 
 impl PersistedToolName {
     /// Borrow the tool name.
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
@@ -565,10 +573,9 @@ impl TryFrom<String> for PersistedToolName {
     type Error = PersistenceError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty() || value.len() > 128 {
-            return Err(PersistenceError::Validation("invalid tool name"));
-        }
-        Ok(Self(value))
+        ToolName::try_from(value)
+            .map(Self)
+            .map_err(|_| PersistenceError::Validation("invalid tool name"))
     }
 }
 
@@ -582,6 +589,7 @@ impl TryFrom<&str> for PersistedToolName {
 
 /// Validated tool arguments payload.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct PersistedToolArguments(String);
 
 impl PersistedToolArguments {
@@ -612,6 +620,7 @@ impl TryFrom<&str> for PersistedToolArguments {
 
 /// Validated tool call type identifier (typically "function").
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct PersistedToolKind(String);
 
 impl PersistedToolKind {
@@ -645,6 +654,7 @@ impl TryFrom<&str> for PersistedToolKind {
 
 /// Reasoning content within a message. Redacted in Debug representations.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct ReasoningContent(String);
 
 impl ReasoningContent {
@@ -859,6 +869,22 @@ impl fmt::Debug for SessionMessage {
     }
 }
 
+/// An optional text field written empty means absent; any other value must
+/// pass its type's constructor. Editors record "no choice" as an empty string.
+fn empty_as_absent<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: TryFrom<String>,
+    T::Error: fmt::Display,
+{
+    match Option::<String>::deserialize(deserializer)? {
+        Some(text) if !text.is_empty() => T::try_from(text)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        _ => Ok(None),
+    }
+}
+
 /// Validated canonical v2 session record.
 ///
 /// All fields are private to guarantee that an unvalidated record cannot be constructed.
@@ -868,11 +894,23 @@ pub struct SessionRecord {
     id: StorageSessionId,
     #[serde(default)]
     revision: StorageRevision,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     mode: Option<SessionMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     provider: Option<SessionProvider>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     model: Option<SessionModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     effort: Option<SessionEffort>,
@@ -894,13 +932,29 @@ pub struct SessionRecord {
     monetary_unknown: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_root: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     project_name: Option<SessionProjectName>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     title: Option<SessionTitle>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     created_at: Option<SessionTimestamp>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_as_absent",
+        skip_serializing_if = "Option::is_none"
+    )]
     updated_at: Option<SessionTimestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transcript: Option<SessionTranscript>,
@@ -1122,7 +1176,7 @@ fn check_schema_version(val: &serde_json::Value) -> Result<(), PersistenceError>
         .get("schema_version")
         .and_then(serde_json::Value::as_u64)
         .ok_or(PersistenceError::Validation("missing schema_version"))?;
-    if ver != 2 {
+    if ver != u64::from(StorageSchemaVersion::V2.as_u32()) {
         return Err(PersistenceError::UnsupportedVersion(ver as u32));
     }
     Ok(())

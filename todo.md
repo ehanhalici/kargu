@@ -5186,6 +5186,13 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           tamamlanmıyor. Native flush/drain gerekiyor.
         - Import seçicisi yerel id'leri hâlâ Elisp dosya adı taramasıyla
           listeliyor; native project listesine geçmeli.
+        - **Modül denetimi (2026-11-09):** Kaydı editörün wire üzerinden
+          göndermesi kesin bir sınır koyuyor: `MAX_FRAME_BYTES` = 1 MiB. Bu yüzden
+          yaklaşık 1 MiB'den büyük bir oturum Elisp'ten kaydedilemiyor
+          (`send_failed`), `session/load` yanıtı da aynı sınıra takılıyor. Rust
+          tarafında dosya ve history limitleri artık birbirinden türetiliyor:
+          `SESSION_MAX_MESSAGES` = `HISTORY_MESSAGES`, dosya = 2 × history byte.
+          Kaydın native history'den kurulması bu sınırı da kaldıracak.
 
         **Önkoşul:** 5.1b; 7.5c1.
 

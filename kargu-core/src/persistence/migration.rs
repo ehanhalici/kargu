@@ -8,7 +8,9 @@
 
 use crate::{
     constants::limits,
-    persistence::domain::{PersistenceError, SessionRecord, StorageSessionId},
+    persistence::domain::{
+        PersistenceError, SessionRecord, StorageSchemaVersion, StorageSessionId,
+    },
 };
 
 /// Raw, unparsed session JSON input payload.
@@ -113,7 +115,9 @@ fn detect_format(val: &serde_json::Value) -> Result<SessionSourceFormat, Persist
         .and_then(serde_json::Value::as_u64)
     {
         None | Some(1) => Ok(SessionSourceFormat::LegacyV1),
-        Some(2) => Ok(SessionSourceFormat::CanonicalV2),
+        Some(version) if version == u64::from(StorageSchemaVersion::V2.as_u32()) => {
+            Ok(SessionSourceFormat::CanonicalV2)
+        }
         Some(other) => Err(PersistenceError::UnsupportedVersion(other as u32)),
     }
 }
@@ -126,7 +130,10 @@ fn build_candidate_json(
         let obj = val
             .as_object_mut()
             .ok_or(PersistenceError::Validation("session root must be object"))?;
-        obj.insert("schema_version".to_owned(), serde_json::json!(2));
+        obj.insert(
+            "schema_version".to_owned(),
+            serde_json::json!(StorageSchemaVersion::V2.as_u32()),
+        );
         if !obj.contains_key("effort") {
             obj.insert("effort".to_owned(), serde_json::json!({"kind": "inherit"}));
         }

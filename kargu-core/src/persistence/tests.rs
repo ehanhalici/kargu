@@ -1022,3 +1022,53 @@ fn listing_is_newest_first_with_descending_id_ties() -> TestResult {
     assert_eq!(ids, ["z-new", "c-tie", "b-tie", "a-old"]);
     Ok(())
 }
+
+#[test]
+fn loading_runs_every_field_constructor_and_reads_empty_choices_as_absent() -> TestResult {
+    let record = |extra: &str| {
+        SessionRecord::try_from(format!(
+            r#"{{"schema_version":2,"id":"v","messages":[]{extra}}}"#
+        ))
+    };
+    // Editors record "no choice" as an empty string; it is absent, not invalid.
+    let unselected = record(r#","provider":"","model":"","title":"""#)?;
+    let value = serde_json::to_value(&unselected)?;
+    assert!(value.get("provider").is_none() && value.get("model").is_none());
+    // Bounds that used to be skipped on load now hold.
+    assert!(record(&format!(r#","title":"{}""#, "t".repeat(513))).is_err());
+    assert!(SessionRecord::try_from(r#"{"schema_version":3,"id":"v","messages":[]}"#).is_err());
+    let call = |id: &str| {
+        record(&format!(
+            r#","messages":[{{"role":"assistant","tool_calls":[{{"id":"{id}","type":"function","function":{{"name":"read_file","arguments":"{{}}"}}}}]}}]"#
+        ))
+    };
+    assert!(call("call-1").is_ok());
+    assert!(call("bad\\u0007id").is_err());
+    assert!(call(&"x".repeat(300)).is_err());
+    Ok(())
+}
+
+/// Every field the editor writes (`kargu-session--build-data`) must survive the
+/// native record; a field the schema does not know would be dropped silently.
+#[test]
+fn every_editor_written_field_survives_the_native_record() -> TestResult {
+    let editor = serde_json::json!({
+        "schema_version": 2, "revision": 1, "id": "editor-shape",
+        "effort": {"kind": "inherit"}, "project_root": "/p/", "project_name": "p",
+        "title": "T", "created_at": "2026-01-01 00:00", "updated_at": "2026-01-01 00:00:01",
+        "mode": "agent", "provider": "prov", "model": "mod", "requests": 3,
+        "tokens_in": 10, "tokens_out": 5, "tokens_spent": 15, "tokens_unknown": false,
+        "monetary_spent": 0, "monetary_reserved": 0.5, "monetary_unknown": false,
+        "transcript": "tx",
+        "messages": [{"role": "user", "content": "hi"}]
+    });
+    let record = SessionRecord::try_from(editor.to_string())?;
+    let saved = serde_json::to_value(&record)?;
+    let (Some(written), Some(kept)) = (editor.as_object(), saved.as_object()) else {
+        return Err("records are objects".into());
+    };
+    for (key, value) in written {
+        assert_eq!(kept.get(key), Some(value), "field {key} must survive");
+    }
+    Ok(())
+}

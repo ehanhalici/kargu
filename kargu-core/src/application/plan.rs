@@ -115,7 +115,7 @@ pub enum PlanState {
 }
 
 /// Bounded implementation plan text.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PlanText(String);
 
 impl PlanText {

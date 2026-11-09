@@ -405,6 +405,37 @@ impl ToolName {
     }
 }
 
+/// Provider-supplied tool-call identity: non-blank, bounded and free of control
+/// characters. Distinct from a native execution-ledger id; history and
+/// persistence share this one rule.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct ProviderCallId(String);
+impl TryFrom<String> for ProviderCallId {
+    type Error = CoreError;
+    fn try_from(value: String) -> Result<Self, CoreError> {
+        if value.trim().is_empty()
+            || value.len() > limits::PROVIDER_CALL_ID_BYTES
+            || value.chars().any(char::is_control)
+        {
+            return Err(CoreError::InvalidValue {
+                field: "ProviderCallId",
+            });
+        }
+        Ok(Self(value))
+    }
+}
+impl ProviderCallId {
+    /// A fresh identity for a provider call that arrived without one.
+    pub fn fresh() -> Self {
+        Self(format!("call_{}", uuid::Uuid::new_v4()))
+    }
+    /// Borrow the exact case-sensitive provider wire identity.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Opaque, bounded owner identity for transport-only reverse calls.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestScope(String);

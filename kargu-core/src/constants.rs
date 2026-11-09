@@ -117,8 +117,10 @@ pub mod limits {
     pub const MAX_APPLICATIONS: usize = 64;
     /// Sessions in one host.
     pub const MAX_SESSIONS: usize = 256;
-    /// Maximum serialized session file size accepted for reading and writing (16 MiB).
-    pub const SESSION_MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
+    /// Maximum serialized session file size accepted for reading and writing.
+    /// A record holds a full history plus its transcript presentation, so it is
+    /// sized from the history bound rather than chosen independently.
+    pub const SESSION_MAX_FILE_BYTES: usize = 2 * HISTORY_BYTES;
     /// Maximum session files inspected during one listing.
     pub const SESSION_LIST_MAX_FILES: usize = 500;
     /// Maximum cumulative bytes read across session files during one listing (64 MiB).
@@ -127,16 +129,18 @@ pub mod limits {
     pub const SESSION_VALIDATE_MAX_DEPTH: usize = 32;
     /// Maximum session nodes inspected before rejecting.
     pub const SESSION_VALIDATE_MAX_NODES: usize = 100_000;
-    /// Maximum messages in one persisted session record.
-    pub const SESSION_MAX_MESSAGES: usize = 10_000;
-    /// Canonical schema version for persisted sessions.
-    pub const SESSION_SCHEMA_VERSION_V2: u32 = 2;
+    /// Maximum messages in one persisted session record: exactly what a
+    /// restored history can hold, so every saved session can be restored.
+    pub const SESSION_MAX_MESSAGES: usize = HISTORY_MESSAGES;
+    const _: () = assert!(SESSION_MAX_FILE_BYTES >= HISTORY_BYTES);
     /// Maximum client version length.
     pub const CLIENT_VERSION_BYTES: usize = 128;
     /// Maximum advertised client capabilities.
     pub const CLIENT_CAPABILITIES: usize = 64;
     /// Maximum tool name length.
     pub const TOOL_NAME_BYTES: usize = 64;
+    /// Maximum provider tool-call identity bytes.
+    pub const PROVIDER_CALL_ID_BYTES: usize = 256;
     /// Maximum opaque request owner length.
     pub const REQUEST_SCOPE_BYTES: usize = 256;
     /// Default run tool call limit.

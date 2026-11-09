@@ -28,7 +28,7 @@ impl From<usize> for CompactKeep {
 }
 
 /// Validated non-empty compaction summary text.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SummaryText(String);
 
 impl SummaryText {
@@ -62,7 +62,7 @@ impl TryFrom<&str> for SummaryText {
 }
 
 /// Byte threshold above which settled conversation history should compact.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct CompactThreshold(usize);
 
 impl CompactThreshold {
@@ -119,7 +119,7 @@ pub fn compaction_prompt_message() -> Result<Message, HistoryError> {
 }
 
 /// Monotonic SHA-256 fingerprint over preserved tail message identities and wire bodies.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct TailHash([u8; 32]);
 
 impl TailHash {
