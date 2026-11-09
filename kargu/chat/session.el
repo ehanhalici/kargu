@@ -392,6 +392,11 @@ Uses UPDATED-AT and MESSAGE-COUNT for status banner."
     (insert (concat "kargu chat — type at the prompt; "
                     "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n"))))
 
+(defun kargu-session--field (session key fallback)
+  "Return SESSION's string KEY, or FALLBACK when it is absent or JSON null."
+  (let ((value (kargu-aget session key)))
+    (if (stringp value) value fallback)))
+
 (defun kargu-session--native-call (origin method params callback)
   "Send persistence METHOD with PARAMS for ORIGIN's scope.
 PARAMS is a function of the native scope returning the request object.
@@ -474,9 +479,9 @@ Return the buffer on immediate success, or an owned task while preparing."
       ((null sessions) (message "kargu: no saved sessions for %s" root))
       (t (let* ((choices (mapcar (lambda (s)
                                    (cons (format "%s (%s - %s)"
-                                                 (or (kargu-aget s "title") "Untitled")
-                                                 (or (kargu-aget s "updated_at") "")
-                                                 (or (kargu-aget s "id") ""))
+                                                 (kargu-session--field s "title" "Untitled")
+                                                 (kargu-session--field s "updated_at" "")
+                                                 (kargu-session--field s "id" ""))
                                          (kargu-aget s "id")))
                                  sessions))
                 (choice (completing-read prompt choices nil t)))
@@ -510,9 +515,9 @@ reported."
 
 (defun kargu-session--choice-entry (session)
   "Return (LABEL . SESSION) pair for `completing-read' from metadata SESSION."
-  (let* ((title (or (kargu-aget session "title") "Untitled"))
-         (time (or (kargu-aget session "updated_at") ""))
-         (mode (or (kargu-aget session "mode") "agent"))
+  (let* ((title (kargu-session--field session "title" "Untitled"))
+         (time (kargu-session--field session "updated_at" ""))
+         (mode (kargu-session--field session "mode" "agent"))
          (cnt (kargu-aget session "message_count"))
          (msgs (kargu-aget session "messages"))
          (msg-count (cond ((natnump cnt) cnt)
@@ -540,7 +545,7 @@ reported."
                      (if error (message "Kargu: %s" error)
                        (pop-to-buffer-same-window buffer)
                        (message "kargu: loaded session '%s'"
-                                (kargu-aget selected "title")))))))))
+                                (kargu-session--field selected "title" "Untitled")))))))))
 
 (defun kargu-chat-sessions (&optional root)
   "Interactively switch to a saved chat session for project ROOT."
@@ -583,7 +588,7 @@ project named by session metadata.  CALLBACK receives (RESULT ERROR)."
         "session_id" session-id
         "storage" (kargu-session--native-storage proj-root 'central)
         "source" (kargu-session--native-storage proj-root 'project)
-        "collision" "override"))
+        "collision" "reject"))
      (lambda (result error)
        (if error
            (let ((msg (format "Import failed: %s" error)))

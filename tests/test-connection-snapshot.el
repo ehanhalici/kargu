@@ -329,7 +329,7 @@
                                       :timeout 180))
          (run (list :session-id "s1" :project-root "/tmp/project" :mode 'agent
                     :budget budget :tool-limit 8 :retry-observer "ui" :max-iterations 5))
-         (arguments (kargu-loop-native--arguments run snapshot))
+         (arguments (kargu-loop-native--run-arguments run snapshot))
          (connection (gethash "connection" arguments))
          (timeouts (gethash "timeouts" connection)))
     (should (= (gethash "tool_limit" arguments) 8))

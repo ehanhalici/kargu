@@ -177,5 +177,33 @@ Return a waiter cleanup; cancelling a waiter cannot cancel a sibling's lease."
         (_ (kargu-bridge--callback callback nil (or (kargu-bridge-conversation-fault binding)
                                                    (kargu-bridge--fault "owner_closed"))) #'ignore))))))
 
+(defun kargu-bridge-conversation-with (session callback)
+  "Deliver SESSION's conversation lease for the current buffer's application.
+CALLBACK receives (CONNECTION APPLICATION SCOPE FAILURE) exactly once.
+The current buffer owns the lease: the core connection, the application
+service and the conversation are ensured in that order."
+  (let ((application (kargu-application-context))
+        (origin (current-buffer))
+        (fail (lambda (failure) (funcall callback nil nil nil failure))))
+    (kargu-bridge-ensure
+     (lambda (connection failure)
+       (if failure
+           (funcall fail failure)
+         (kargu-bridge-application-ensure
+          connection application
+          (lambda (service failure)
+            (cond
+             (failure (funcall fail failure))
+             ((not (buffer-live-p origin))
+              (funcall fail (kargu-bridge--fault "owner_closed")))
+             (t
+              (with-current-buffer origin
+                (kargu-bridge-conversation-ensure
+                 connection application session service
+                 (lambda (scope failure)
+                   (if failure
+                       (funcall fail failure)
+                     (funcall callback connection application scope nil))))))))))))))
+
 (provide 'kargu/bridge/conversation)
 ;;; conversation.el ends here

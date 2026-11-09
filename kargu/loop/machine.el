@@ -164,16 +164,6 @@ PROMPT nil means continue from the existing history."
     (unless (eq handler 'ignore)
       (funcall handler run prompt))))
 
-(defun kargu-loop--deliver-delta (callback text &optional thought)
-  "Deliver TEXT to CALLBACK once, optionally identifying a THOUGHT."
-  (condition-case err
-      (save-match-data
-        (if (and thought (not (equal (cdr (func-arity callback)) 1)))
-            (funcall callback text 'thought)
-          (funcall callback text)))
-    (error (kargu-log 'warn "Stream listener failed: %s"
-                       (error-message-string err)))))
-
 (defun kargu--loop-forward-delta (run event)
   "Forward the text or thought delta of one decoded SSE EVENT to RUN's on-delta."
   (when (kargu-loop--live-p run)
@@ -187,9 +177,9 @@ PROMPT nil means continue from the existing history."
            (text (kargu--content-text delta))
            (reason (kargu--reasoning-text delta)))
       (when (and reason on-delta)
-        (kargu-loop--deliver-delta on-delta reason t))
+        (kargu-execution-deliver-delta on-delta reason t))
       (when (and text on-delta (kargu-loop--live-p run))
-        (kargu-loop--deliver-delta on-delta text)))))
+        (kargu-execution-deliver-delta on-delta text)))))
 
 ;;;; Response -------------------------------------------------------------
 

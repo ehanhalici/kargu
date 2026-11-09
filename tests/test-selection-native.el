@@ -16,6 +16,8 @@
 (require 'kargu/selection)
 (require 'kargu/bridge/selection)
 (require 'kargu/chat)
+(require 'kargu/bridge/mode)
+(require 'kargu/bridge/plan)
 
 (defmacro kargu-selection-native-test--with-core (&rest body)
   "Run BODY in a buffer whose selection port is the real Rust conversation."
@@ -159,6 +161,54 @@
             (should (string-match-p "refused" result))
             (should (eq owner (kargu-session-context)))
             (should (equal (kargu-selection-model) "kept"))))))))
+
+(defun kargu-selection-native-test--await (start)
+  "Call START with a two-argument callback; wait and return (RESULT FAILURE)."
+  (let (reply)
+    (funcall start (lambda (result failure) (setq reply (list result failure))))
+    (kargu-bridge-test--wait (lambda () reply))
+    reply))
+
+(ert-deftest kargu-mode-native-commit-reaches-the-conversation-test ()
+  "A mode commit is sent through the shared lease chain and acknowledged."
+  (kargu-selection-native-test--with-core
+    (let* ((session (kargu-session-context))
+           (desired (if (eq (kargu-session-mode-value session) 'plan) 'agent 'plan))
+           (reply (kargu-selection-native-test--await
+                   (lambda (done) (kargu-bridge-mode-commit session desired nil done)))))
+      (should-not (cadr reply))
+      (should (eq (plist-get (car reply) :mode) desired))
+      (should (eq (kargu-session-mode-value session) desired))
+      (should (= (kargu-session-mode-revision session) 1)))))
+
+(ert-deftest kargu-plan-native-create-revise-claim-round-trip-test ()
+  "Plan calls reach Rust, and a claim succeeds on the core's revision and hash."
+  (kargu-selection-native-test--with-core
+    (let* ((session (kargu-session-context))
+           (created (kargu-selection-native-test--await
+                     (lambda (done) (kargu-bridge-plan-create session "step one" done))))
+           (plan (car created)))
+      (should-not (cadr created))
+      (should (= (plist-get plan :revision) 1))
+      (should (equal (plist-get plan :content-hash) (secure-hash 'sha256 "step one")))
+      (let* ((revised (kargu-selection-native-test--await
+                       (lambda (done)
+                         (kargu-bridge-plan-revise session (plist-get plan :id) 1 "step two" done))))
+             (next (car revised)))
+        (should-not (cadr revised))
+        (should (= (plist-get next :revision) 2))
+        (let ((stale (kargu-selection-native-test--await
+                      (lambda (done)
+                        (kargu-bridge-plan-claim session (plist-get plan :id) 1
+                                                 (plist-get plan :content-hash) done)))))
+          (should (cadr stale)))
+        (let ((claimed (kargu-selection-native-test--await
+                        (lambda (done)
+                          (kargu-bridge-plan-claim session (plist-get next :id)
+                                                   (plist-get next :revision)
+                                                   (plist-get next :content-hash) done)))))
+          (should-not (cadr claimed))
+          (should (eq (plist-get (car claimed) :state) :dispatching)))))))
 
 (provide 'tests/test-selection-native)
 ;;; test-selection-native.el ends here

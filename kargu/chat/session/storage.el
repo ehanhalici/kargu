@@ -63,9 +63,14 @@ change the default.  No Git ignore or index files are modified."
     (format "%s-%s" clean (substring (secure-hash 'sha1 canonical) 0 8))))
 
 (defun kargu-session-storage--assert-id (id)
-  "Return ID when it is a safe filename component; otherwise signal."
+  "Return ID when it is a safe filename component; otherwise signal.
+This is the core's session identifier rule: ASCII, at most 128 bytes,
+alphanumeric first, then alphanumerics, `_', `.' or `-', and no `..'."
   (unless (and (stringp id)
-               (string-match-p (rx bos (any alnum) (* (any alnum "_.-")) eos) id))
+               (<= 1 (string-bytes id) 128)
+               (let ((case-fold-search nil))
+                 (string-match-p (rx bos (any "a-zA-Z0-9") (* (any "a-zA-Z0-9_.-")) eos) id))
+               (not (string-search ".." id)))
     (user-error "Kargu: invalid session identifier; use a plain filename without path separators"))
   id)
 

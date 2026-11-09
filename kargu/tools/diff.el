@@ -971,8 +971,7 @@ Format:
   (advice-add 'kargu-query-changes :override #'kargu-diff-query-changes)
   (advice-add 'kargu-edit-submit :override #'kargu-diff-submit-edit)
   (advice-add 'kargu-execution-prepare :after #'kargu-diff-prepare-execution)
-  (add-hook 'kargu-session-before-replace-hook #'kargu-diff-retire-session)
-  (advice-add 'kargu-edit-submit-plan :override #'kargu-diff-submit-plan))
+  (add-hook 'kargu-session-before-replace-hook #'kargu-diff-retire-session))
 
 (defun kargu-diff-retire-session (session)
   "Close only the edit service captured by retiring SESSION in this buffer."
@@ -994,7 +993,6 @@ Format:
   (advice-remove 'kargu-edit-submit #'kargu-diff-submit-edit)
   (advice-remove 'kargu-execution-prepare #'kargu-diff-prepare-execution)
   (remove-hook 'kargu-session-before-replace-hook #'kargu-diff-retire-session)
-  (advice-remove 'kargu-edit-submit-plan #'kargu-diff-submit-plan)
   nil)
 
 (provide 'kargu/tools/diff)

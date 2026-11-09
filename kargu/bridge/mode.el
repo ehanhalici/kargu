@@ -85,18 +85,13 @@ CONNECTION and APPLICATION are the captured lease of SCOPE."
   "Commit DESIRED mode for SESSION in Rust conversation; deliver CALLBACK once.
 DEBUG-READY indicates whether debugger preparation succeeded.
 CALLBACK receives (RESULT FAILURE) where RESULT is the native mode DTO."
-  (let ((origin (current-buffer)))
-    (kargu-bridge-application-ensure
-     (lambda (connection app failure)
-       (if failure
-           (kargu-bridge--callback callback nil failure)
-         (kargu-bridge-conversation-ensure
-          connection app session origin
-          (lambda (scope failure)
-            (if failure
-                (kargu-bridge--callback callback nil failure)
-              (kargu-bridge-mode--send
-               connection app session scope desired debug-ready callback)))))))))
+  (kargu-bridge-conversation-with
+   session
+   (lambda (connection application scope failure)
+     (if failure
+         (kargu-bridge--callback callback nil failure)
+       (kargu-bridge-mode--send
+        connection application session scope desired debug-ready callback)))))
 
 (provide 'kargu/bridge/mode)
 ;;; mode.el ends here

@@ -102,5 +102,16 @@
                    (kargu-session-context (kargu-execution-origin context))))
       (apply #'kargu-execution-call context function args))))
 
+(defun kargu-execution-deliver-delta (callback text &optional thought)
+  "Deliver streamed TEXT to CALLBACK once, optionally identifying a THOUGHT.
+A failing listener is logged and never interrupts the stream."
+  (condition-case err
+      (save-match-data
+        (if (and thought (not (equal (cdr (func-arity callback)) 1)))
+            (funcall callback text 'thought)
+          (funcall callback text)))
+    (error (kargu-log 'warn "Stream listener failed: %s"
+                       (error-message-string err)))))
+
 (provide 'kargu/application/execution)
 ;;; execution.el ends here

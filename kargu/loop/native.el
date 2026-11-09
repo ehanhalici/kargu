@@ -38,15 +38,6 @@ Startup errors are reported without switching to the Elisp backend."
   "Return the explicit native backend choice, including when core is missing."
   kargu-loop-native-agent-enabled)
 
-(defun kargu-loop--deliver-delta (callback text &optional thought)
-  "Deliver TEXT to CALLBACK once, optionally identifying a THOUGHT."
-  (condition-case err
-      (save-match-data
-        (if (and thought (not (equal (cdr (func-arity callback)) 1)))
-            (funcall callback text 'thought)
-          (funcall callback text)))
-    (error (kargu-log 'warn "Stream listener failed: %s"
-                       (error-message-string err)))))
 
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu-loop--live-p "kargu/loop" (run))
@@ -58,10 +49,14 @@ Startup errors are reported without switching to the Elisp backend."
 (declare-function kargu--api-base "kargu/config/key" ())
 (declare-function kargu--api-key "kargu/config/key" ())
 (defun kargu-loop-native--editor-tools ()
-  "List of editor tools allowlisted for native agent reverse dispatch."
+  "List of editor tools allowlisted for native agent reverse dispatch.
+Exactly the tools `kargu-bridge-sensor-call-tool' and the native edit
+port serve; debugger tools have no reverse handler and stay unlisted."
   (vector "read_file_symbols"
           "read_symbol"
           "lsp_diagnostics"
+          "lsp_find_symbol"
+          "lsp_project_skeleton"
           "edit_file"
           "write_file"
           "apply_patch"
@@ -148,7 +143,6 @@ Startup errors are reported without switching to the Elisp backend."
                               90))
             (timeout-ms (kargu-transport--milliseconds timeout-secs))
             (turn-limit (or (plist-get run :max-iterations) kargu-max-iterations 12))
-            (tool-limit (or (plist-get run :tool-limit) 25))
             (observer (or (plist-get run :retry-observer) "none")))
        (setcdr (assoc "session" auth) (plist-get run :session-id))
        ;; These metadata assertions are owned by the native publication.
@@ -160,7 +154,7 @@ Startup errors are reported without switching to the Elisp backend."
         "prompt" :json-null
         "tools_enabled" (if (plist-get capabilities :tools) t :json-false)
         "editor_available" (kargu-loop-native--editor-tools)
-        "tool_limit" tool-limit "turn_limit" turn-limit
+        "turn_limit" turn-limit
         "timeout_ms" timeout-ms
         "model_revision" (or (plist-get settings :metadata-revision) 0)
         "config_revision" (kargu-connection-snapshot-config-revision snapshot)
@@ -188,6 +182,14 @@ Startup errors are reported without switching to the Elisp backend."
                  "observer" observer
                  "policy" (kargu-providers-wire-object (kargu-api-retry-preferences))))))))
 
+(defun kargu-loop-native--run-arguments (run snapshot)
+  "Return RUN's native arguments; a stated tool limit is RUN's user choice.
+Without one the core's default tool-call limit applies."
+  (let ((arguments (kargu-loop-native--arguments run snapshot)))
+    (when-let* ((limit (plist-get run :tool-limit)))
+      (puthash "tool_limit" limit arguments))
+    arguments))
+
 (defun kargu-loop-native-start (run prompt)
   "Execute RUN for PROMPT through its captured native application lease."
   (plist-put run :native-backend t)
@@ -195,7 +197,7 @@ Startup errors are reported without switching to the Elisp backend."
          (snapshot (plist-get run :connection-snapshot)))
     (unless (and (kargu-execution-p context) (kargu-loop--live-p run))
       (error "Native agent requires a live execution context"))
-    (let ((arguments (kargu-loop-native--arguments run snapshot))
+    (let ((arguments (kargu-loop-native--run-arguments run snapshot))
           (on-delta (plist-get run :on-delta)))
       (puthash "prompt" (kargu-bridge--object "role" "user" "content" prompt) arguments)
       (let ((task
@@ -211,7 +213,7 @@ Startup errors are reported without switching to the Elisp backend."
               :on-delta (kargu-execution-wrap
                          context (lambda (chunk)
                                    (when (and on-delta (stringp chunk))
-                                     (kargu-loop--deliver-delta on-delta chunk))))
+                                     (kargu-execution-deliver-delta on-delta chunk))))
               :on-event (kargu-execution-wrap context (lambda (method event)
                           (when (and (equal method "session/state")
                                      (hash-table-p event)

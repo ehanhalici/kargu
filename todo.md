@@ -3776,6 +3776,20 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Denetim (2026-11-09) — yeniden açıldı:** `plan/store.el` kimlik/revision/hash'i yerelde üretip native'e fire-and-forget aynalıyor; native claim/revise hatası yalnız loglanıyor ve dispatch'i durdurmuyor, yani gate native değil. Düzeltilen: native create yanıtı gelmeden yerel md5 kimliğiyle revise/claim/complete/reject gönderilmesi engellendi. Kalan: native plan DTO'su tek otorite olmalı; claim başarısızsa dispatch başlamamalı.
 
+      **Modül denetimi (2026-11-09):** 2026-11-08 kaydındaki "bağlandı" ifadesi yanlıştı.
+        - `bridge/plan.el` hiçbir yerden yüklenmiyordu; `plan/store.el`'deki `fboundp`
+          korumaları her zaman false dönüyordu.
+        - `bridge/plan.el` ve `bridge/mode.el`, `kargu-bridge-application-ensure`'u bir
+          argümanla çağırıyordu (imza üç argüman). Bu yüzden `session/mode/commit` ve
+          hiçbir plan çağrısı core'a ulaşmıyordu.
+        - Düzeltme: üç köprü ortak `kargu-bridge-conversation-with` lease zincirini
+          kullanıyor. Store `bridge/plan`'ı lazy require ediyor ve core'un
+          revision/hash yanıtını benimsiyor. Create yanıtından önce yapılan düzenleme
+          revise ile senkronlanıyor.
+        - Kanıt (gerçek core ERT): `kargu-mode-native-commit-reaches-the-conversation-test`,
+          `kargu-plan-native-create-revise-claim-round-trip-test` (stale claim reddi dahil).
+        - Kalan aynı: claim kararı hâlâ Elisp'te; claim başarısızsa dispatch durmalı.
+
   - [x] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
     → history repair → terminal event/release → yeni admission sırasını uygula.
     Çift iptal, owner close, reset ve stale generation tek terminal teslim etsin;

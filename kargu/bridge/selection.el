@@ -101,28 +101,13 @@ CONNECTION and APPLICATION are the captured lease of SCOPE."
   "Commit DESIRED for SESSION in its Rust conversation; deliver CALLBACK once.
 CALLBACK receives (SELECTION FAILURE) where SELECTION is the native
 acknowledgement.  The current buffer owns the conversation lease."
-  (let ((application (kargu-application-context))
-        (origin (current-buffer)))
-    (kargu-bridge-ensure
-     (lambda (connection failure)
-       (if failure
-           (kargu-bridge--callback callback nil failure)
-         (kargu-bridge-application-ensure
-          connection application
-          (lambda (service failure)
-            (cond
-             (failure (kargu-bridge--callback callback nil failure))
-             ((not (buffer-live-p origin))
-              (kargu-bridge--callback callback nil (kargu-bridge--fault "owner_closed")))
-             (t
-              (with-current-buffer origin
-                (kargu-bridge-conversation-ensure
-                 connection application session service
-                 (lambda (scope failure)
-                   (if failure
-                       (kargu-bridge--callback callback nil failure)
-                     (kargu-bridge-selection--send
-                      connection application session scope desired callback))))))))))))))
+  (kargu-bridge-conversation-with
+   session
+   (lambda (connection application scope failure)
+     (if failure
+         (kargu-bridge--callback callback nil failure)
+       (kargu-bridge-selection--send
+        connection application session scope desired callback)))))
 
 (provide 'kargu/bridge/selection)
 ;;; selection.el ends here

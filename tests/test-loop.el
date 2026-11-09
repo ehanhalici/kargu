@@ -503,7 +503,7 @@
     (dolist (callback (list (lambda (text) (push (list text) seen))
                             (lambda (text &optional kind) (push (list text kind) seen))
                             (lambda (&rest arguments) (push arguments seen))))
-      (kargu-loop--deliver-delta callback "text" t))
+      (kargu-execution-deliver-delta callback "text" t))
     (should (equal (nreverse seen) '(("text") ("text" thought) ("text" thought))))))
 
 (ert-deftest kargu-loop-truncated-reasoning-is-never-a-success-test ()

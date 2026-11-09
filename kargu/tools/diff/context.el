@@ -597,7 +597,5 @@ When CALLBACK is non-nil, delivers the result asynchronously to CALLBACK."
                    (t nil))))
     (kargu-diff--submit-plan-impl service plan callback)))
 
-(defalias 'kargu-edit-submit-plan #'kargu-diff-submit-plan)
-
 (provide 'kargu/tools/diff/context)
 ;;; context.el ends here

@@ -72,14 +72,6 @@ Absence of evidence is not a successful diagnostic verification."
     (unless callback (kargu-contract-assert #'stringp result))
     result))
 
-(cl-defun kargu-edit-submit-plan (service plan &key callback)
-  "Submit transaction PLAN to edit SERVICE with optional CALLBACK.
-When no editing provider is installed, reject with unavailable error."
-  (ignore service plan)
-  (let ((result (kargu-err "ERROR: editing provider unavailable; nothing was changed" :unavailable)))
-    (if callback
-        (funcall callback result)
-      result)))
 
 (provide 'kargu/edit)
 ;;; edit.el ends here

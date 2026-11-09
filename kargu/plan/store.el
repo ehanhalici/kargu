@@ -93,47 +93,66 @@
     (kargu-plan--attach-record buffer record)
     (with-current-buffer buffer
       (setq default-directory (kargu-plan-record-root record)))
-    (when (and (fboundp 'kargu-bridge-status)
-               (eq (kargu-bridge-status) 'ready)
-               (fboundp 'kargu-bridge-plan-create))
-      (when-let* ((session (kargu-session-context origin)))
-        (kargu-bridge-plan-create
-         session plan-text
-         (lambda (plan-dto error-data)
-           (when (and plan-dto (null error-data))
-             (when-let* ((native-id (plist-get plan-dto :id)))
-               (setf (kargu-plan-record-id record) native-id))
-             (when-let* ((native-rev (plist-get plan-dto :revision)))
-               (setf (kargu-plan-record-revision record) native-rev))
-             (when-let* ((native-hash (plist-get plan-dto :content-hash)))
-               (setf (kargu-plan-record-content-hash record) native-hash))
-             ;; Only a record the core created may be revised, claimed or settled.
-             (setf (kargu-plan-record-native record) t))))))
+    (when-let* ((session (kargu-plan--native-session origin)))
+      (kargu-bridge-plan-create
+       session plan-text
+       (lambda (plan-dto error-data)
+         (if error-data
+             (kargu-log 'warn "Native plan create error: %s" error-data)
+           (kargu-plan--adopt record plan-dto)
+           ;; Only a record the core created may be revised, claimed or settled.
+           (setf (kargu-plan-record-native record) t)
+           (kargu-plan--sync-text record)))))
     record))
+
+(defun kargu-plan--native-session (origin)
+  "Return ORIGIN's session when the native plan port is reachable now."
+  (when (and (fboundp 'kargu-bridge-status) (eq (kargu-bridge-status) 'ready))
+    (require 'kargu/bridge/plan)
+    (kargu-session-context origin)))
+
+(defun kargu-plan--adopt (record plan-dto)
+  "Adopt the core's id, revision and content hash from PLAN-DTO into RECORD."
+  (when plan-dto
+    (when-let* ((id (plist-get plan-dto :id))) (setf (kargu-plan-record-id record) id))
+    (when-let* ((rev (plist-get plan-dto :revision))) (setf (kargu-plan-record-revision record) rev))
+    (when-let* ((hash (plist-get plan-dto :content-hash)))
+      (setf (kargu-plan-record-content-hash record) hash))))
+
+(defun kargu-plan--text (record)
+  "Return RECORD's review text as the core hashes it."
+  (with-current-buffer (kargu-plan-record-buffer record)
+    (save-restriction
+      (widen)
+      (string-trim (buffer-substring-no-properties (point-min) (point-max))))))
+
+(defun kargu-plan--sync-text (record)
+  "Send RECORD's current review text to the core when it differs from its hash.
+The core owns the revision and hash; its acknowledgement is adopted."
+  (when-let* (((eq (kargu-plan-record-state record) :pending))
+              ((kargu-plan-record-native record))
+              ((buffer-live-p (kargu-plan-record-buffer record)))
+              (text (kargu-plan--text record))
+              ((not (equal (secure-hash 'sha256 text) (kargu-plan-record-content-hash record))))
+              (session (kargu-plan--native-session (kargu-plan-record-origin record))))
+    (kargu-bridge-plan-revise
+     session (kargu-plan-record-id record) (kargu-plan-record-revision record) text
+     (lambda (plan-dto error-data)
+       (if error-data
+           (kargu-log 'warn "Native plan revise error: %s" error-data)
+         (kargu-plan--adopt record plan-dto))))))
 
 (defun kargu-plan--after-change (&rest _args)
   "Notify plan record when review buffer content changes."
   (when-let* ((record (kargu-plan-current)))
-    (when (eq (kargu-plan-record-state record) :pending)
-      (let* ((text (save-restriction
-                     (widen)
-                     (string-trim (buffer-substring-no-properties (point-min) (point-max)))))
-             (hash (secure-hash 'sha256 text)))
-        (unless (equal hash (kargu-plan-record-content-hash record))
-          (let ((old-rev (kargu-plan-record-revision record)))
-            (setf (kargu-plan-record-content-hash record) hash)
-            (setf (kargu-plan-record-revision record) (1+ old-rev))
-            (when (and (fboundp 'kargu-bridge-status)
-                       (eq (kargu-bridge-status) 'ready)
-                       (fboundp 'kargu-bridge-plan-revise))
-              (when-let* ((session (kargu-session-context (kargu-plan-record-origin record)))
-                          ((kargu-plan-record-native record))
-                          (plan-id (kargu-plan-record-id record)))
-                (kargu-bridge-plan-revise
-                 session plan-id old-rev text
-                 (lambda (_reply error-data)
-                   (when error-data
-                     (kargu-log 'warn "Native plan revise error: %s" error-data))))))))))))
+    (if (kargu-plan-record-native record)
+        (kargu-plan--sync-text record)
+      ;; A record the core never created keeps its local edition count.
+      (let ((hash (secure-hash 'sha256 (kargu-plan--text record))))
+        (when (and (eq (kargu-plan-record-state record) :pending)
+                   (not (equal hash (kargu-plan-record-content-hash record))))
+          (setf (kargu-plan-record-content-hash record) hash)
+          (cl-incf (kargu-plan-record-revision record)))))))
 
 (defun kargu-plan--attach-record (buffer record)
   "Attach RECORD to validated BUFFER with locally owned cleanup hooks."
@@ -158,19 +177,16 @@
   (kargu-plan-assert-current record)
   (when (eq (kargu-plan-record-state record) :pending)
     (setf (kargu-plan-record-state record) :dispatching)
-    (when (and (fboundp 'kargu-bridge-status)
-               (eq (kargu-bridge-status) 'ready)
-               (fboundp 'kargu-bridge-plan-claim))
-      (when-let* ((session (kargu-session-context (kargu-plan-record-origin record)))
-                  ((kargu-plan-record-native record))
-                  (plan-id (kargu-plan-record-id record))
-                  (rev (kargu-plan-record-revision record))
-                  (hash (kargu-plan-record-content-hash record)))
-        (kargu-bridge-plan-claim
-         session plan-id rev hash
-         (lambda (_reply error-data)
-           (when error-data
-             (kargu-log 'warn "Native plan claim error: %s" error-data))))))
+    (when-let* (((kargu-plan-record-native record))
+                (session (kargu-plan--native-session (kargu-plan-record-origin record)))
+                (plan-id (kargu-plan-record-id record))
+                (rev (kargu-plan-record-revision record))
+                (hash (kargu-plan-record-content-hash record)))
+      (kargu-bridge-plan-claim
+       session plan-id rev hash
+       (lambda (_reply error-data)
+         (when error-data
+           (kargu-log 'warn "Native plan claim error: %s" error-data)))))
     t))
 
 (defun kargu-plan-complete (record success)
@@ -181,17 +197,14 @@ Never restore a decision belonging to a replaced or invalid owner."
           (cond ((not (kargu-plan-current-p record)) :cancelled)
                 (success :approved)
                 (t :pending)))
-    (when (and (fboundp 'kargu-bridge-status)
-               (eq (kargu-bridge-status) 'ready)
-               (fboundp 'kargu-bridge-plan-complete))
-      (when-let* ((session (kargu-session-context (kargu-plan-record-origin record)))
-                  ((kargu-plan-record-native record))
-                  (plan-id (kargu-plan-record-id record)))
-        (kargu-bridge-plan-complete
-         session plan-id success
-         (lambda (_reply error-data)
-           (when error-data
-             (kargu-log 'warn "Native plan complete error: %s" error-data))))))))
+    (when-let* (((kargu-plan-record-native record))
+                (session (kargu-plan--native-session (kargu-plan-record-origin record)))
+                (plan-id (kargu-plan-record-id record)))
+      (kargu-bridge-plan-complete
+       session plan-id success
+       (lambda (_reply error-data)
+         (when error-data
+           (kargu-log 'warn "Native plan complete error: %s" error-data)))))))
 
 (defun kargu-plan-cancel-dispatch (record)
   "Cancel RECORD's pending dispatch and its owned preparation resources."
@@ -204,18 +217,15 @@ Never restore a decision belonging to a replaced or invalid owner."
   (kargu-plan-assert-current record)
   (when (eq (kargu-plan-record-state record) :pending)
     (setf (kargu-plan-record-state record) :rejected)
-    (when (and (fboundp 'kargu-bridge-status)
-               (eq (kargu-bridge-status) 'ready)
-               (fboundp 'kargu-bridge-plan-reject))
-      (when-let* ((session (kargu-session-context (kargu-plan-record-origin record)))
-                  ((kargu-plan-record-native record))
-                  (plan-id (kargu-plan-record-id record))
-                  (rev (kargu-plan-record-revision record)))
-        (kargu-bridge-plan-reject
-         session plan-id rev
-         (lambda (_reply error-data)
-           (when error-data
-             (kargu-log 'warn "Native plan reject error: %s" error-data))))))
+    (when-let* (((kargu-plan-record-native record))
+                (session (kargu-plan--native-session (kargu-plan-record-origin record)))
+                (plan-id (kargu-plan-record-id record))
+                (rev (kargu-plan-record-revision record)))
+      (kargu-bridge-plan-reject
+       session plan-id rev
+       (lambda (_reply error-data)
+         (when error-data
+           (kargu-log 'warn "Native plan reject error: %s" error-data)))))
     t))
 
 (defun kargu-plan--forget-buffer ()

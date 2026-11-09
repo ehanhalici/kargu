@@ -55,6 +55,8 @@ struct PromptInput {
     tools_enabled: bool,
     #[serde(default)]
     editor_available: Vec<ToolName>,
+    /// The core's default applies unless the editor states a user choice.
+    #[serde(default)]
     tool_limit: ToolCallLimit,
     turn_limit: ModelTurnLimit,
     timeout_ms: RunTimeout,

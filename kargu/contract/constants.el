@@ -51,35 +51,6 @@
 (defconst kargu-role-tool "tool"
   "Tool execution result turn role.")
 
-;;;; HTTP status codes ----------------------------------------------------
-
-(defconst kargu-http-too-many-requests 429
-  "HTTP 429 Rate limited / Too Many Requests.")
-
-(defconst kargu-http-internal-error 500
-  "HTTP 500 Internal Server Error.")
-
-(defconst kargu-http-bad-gateway 502
-  "HTTP 502 Bad Gateway.")
-
-(defconst kargu-http-unavailable 503
-  "HTTP 503 Service Unavailable.")
-
-(defconst kargu-http-gateway-timeout 504
-  "HTTP 504 Gateway Timeout.")
-
-(defconst kargu-http-overloaded 529
-  "HTTP 529 Site is overloaded.")
-
-(defconst kargu-http-retry-statuses
-  (list kargu-http-too-many-requests
-        kargu-http-internal-error
-        kargu-http-bad-gateway
-        kargu-http-unavailable
-        kargu-http-gateway-timeout
-        kargu-http-overloaded)
-  "HTTP status codes that qualify for retry and backoff.")
-
 (provide 'kargu/contract/constants)
 
 ;;; constants.el ends here

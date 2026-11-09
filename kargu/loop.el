@@ -241,12 +241,15 @@ stop only that run; otherwise stop the application current run."
           (if (null kargu--loop-run)
               "idle"
             (format
-             "running: state %s, iteration %d/%d, healing rounds %d/%d, verifications %d, model request %s"
+             "running: state %s, iteration %d/%d, healing rounds %s, verifications %d, model request %s"
              (or (plist-get kargu--loop-run :state) 'request)
              (or (plist-get kargu--loop-run :iterations) 0)
              (kargu-loop--turn-cap kargu--loop-run)
-             (or (plist-get kargu--loop-run :healing) 0)
-             kargu-max-healing-steps
+             ;; Native runs report rounds only; the core owns their healing cap.
+             (let ((rounds (or (plist-get kargu--loop-run :healing) 0)))
+               (if (plist-get kargu--loop-run :native-backend)
+                   (number-to-string rounds)
+                 (format "%d/%d" rounds kargu-max-healing-steps)))
              (or (plist-get kargu--loop-run :verifications) 0)
              (if (kargu-busy-p) "in flight" "local work")))))
     (when (called-interactively-p 'any)
