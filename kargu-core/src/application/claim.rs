@@ -22,7 +22,7 @@ pub struct RequestedWorkspace(PathBuf);
 impl TryFrom<PathBuf> for RequestedWorkspace {
     type Error = CoreError;
     fn try_from(value: PathBuf) -> Result<Self, CoreError> {
-        crate::workspace::command::validate_path(&value)?;
+        crate::domain::check_path(&value)?;
         if !value.is_absolute() || value.to_str().is_none() {
             return Err(CoreError::Rejected);
         }

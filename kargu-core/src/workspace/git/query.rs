@@ -47,7 +47,7 @@ struct RepositoryPath(PathBuf);
 impl TryFrom<PathBuf> for RepositoryPath {
     type Error = CoreError;
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        super::super::command::validate_path(&path)?;
+        crate::domain::check_path(&path)?;
         if path.as_os_str().is_empty() || path.as_os_str().as_encoded_bytes().contains(&0) {
             return Err(CoreError::InvalidValue { field: "GitPath" });
         }

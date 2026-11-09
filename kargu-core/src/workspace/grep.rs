@@ -16,7 +16,7 @@ use serde::Deserialize;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 /// Search request, never an arbitrary program/argv or effect-class override.
@@ -101,11 +101,7 @@ impl GrepInput {
     pub(crate) fn prepare(self) -> Result<(CommandSpec, RunSettings, GrepReport), CoreError> {
         let path = self.path.as_deref().unwrap_or(Path::new("."));
         for input in [&self.root, path] {
-            if input.as_os_str().len() > limits::SEARCH_PATH_BYTES
-                || input.components().any(|c| c == Component::ParentDir)
-            {
-                return Err(CoreError::Rejected);
-            }
+            crate::domain::check_path(input)?;
         }
         if !self.root.is_absolute() {
             return Err(CoreError::Rejected);

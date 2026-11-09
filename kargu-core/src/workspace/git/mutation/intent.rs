@@ -55,7 +55,7 @@ impl TryFrom<Vec<PathBuf>> for Paths {
             return Err(CoreError::Limit);
         }
         for path in &value {
-            crate::workspace::command::validate_path(path)?;
+            crate::domain::check_path(path)?;
             if path.as_os_str().is_empty() || path.as_os_str().as_encoded_bytes().contains(&0) {
                 return Err(CoreError::Rejected);
             }

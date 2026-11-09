@@ -70,9 +70,9 @@ impl ChangeReservations {
 }
 
 #[derive(Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct HistoryRevision(u64);
+pub(crate) struct ChangeRevision(u64);
 
-impl HistoryRevision {
+impl ChangeRevision {
     pub(super) fn advance(&mut self) -> Result<(), CoreError> {
         self.0 = self.0.checked_add(1).ok_or(CoreError::ArithmeticOverflow)?;
         Ok(())
@@ -83,7 +83,7 @@ impl HistoryRevision {
 #[derive(Default)]
 pub(crate) struct AppliedPublication {
     pub(crate) rollback_available: bool,
-    pub(crate) edit_revision: Option<HistoryRevision>,
+    pub(crate) edit_revision: Option<ChangeRevision>,
 }
 
 /// No retained baseline is different from an originally absent file.
@@ -134,7 +134,7 @@ pub(super) struct ChangedFileRecord {
     pub(super) session: SessionId,
     pub(super) service_id: Option<EditServiceId>,
     pub(super) edit_id: EditorEditId,
-    pub(super) revision: HistoryRevision,
+    pub(super) revision: ChangeRevision,
     pub(super) file: FileIndex,
     pub(super) root: PathBuf,
     pub(super) full_path: PathBuf,
@@ -154,7 +154,7 @@ pub(super) struct ChangedFileRecord {
 /// Bounded conversation evidence; retained rows are not a complete run audit.
 #[derive(Serialize)]
 pub(crate) struct ChangeSummary {
-    revision: HistoryRevision,
+    revision: ChangeRevision,
     pending_files: FileCount,
     retained_files: FileCount,
     verified_files: FileCount,
@@ -162,7 +162,7 @@ pub(crate) struct ChangeSummary {
 impl ChangeSummary {
     pub(super) fn capture(
         session: &SessionId,
-        revision: HistoryRevision,
+        revision: ChangeRevision,
         changes: &VecDeque<ChangedFileRecord>,
     ) -> Result<Self, CoreError> {
         let owned: Vec<_> = changes
@@ -201,24 +201,24 @@ pub(super) fn publish_change(
 pub(super) enum HistoryQuery {
     List {
         offset: FileCursor,
-        revision: Option<HistoryRevision>,
+        revision: Option<ChangeRevision>,
         service_id: Option<EditServiceId>,
     },
     Files {
         edit_id: EditorEditId,
         offset: FileCursor,
-        revision: HistoryRevision,
+        revision: ChangeRevision,
         service_id: Option<EditServiceId>,
     },
     Changes {
         offset: FileCursor,
-        revision: Option<HistoryRevision>,
+        revision: Option<ChangeRevision>,
         service_id: Option<EditServiceId>,
         pending_only: Option<bool>,
     },
     Consume {
         edit_id: EditorEditId,
-        edit_revision: HistoryRevision,
+        edit_revision: ChangeRevision,
         file: FileIndex,
         final_hash: Option<ContentHash>,
         service_id: Option<EditServiceId>,
@@ -235,7 +235,7 @@ pub(super) fn execute(
     snapshots: &mut VecDeque<AppliedSnapshot>,
     changes: &mut VecDeque<ChangedFileRecord>,
     session: &SessionId,
-    current: &mut HistoryRevision,
+    current: &mut ChangeRevision,
     input: HistoryQuery,
     frame: ByteLimit,
 ) -> Result<Value, CoreError> {

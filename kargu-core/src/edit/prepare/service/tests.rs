@@ -23,7 +23,7 @@ fn record(
         session: session.clone(),
         service_id: None,
         edit_id: EditorEditId::new(),
-        revision: history::HistoryRevision::default(),
+        revision: history::ChangeRevision::default(),
         file: FileIndex::try_from(0)?,
         root: PathBuf::from("/retained"),
         full_path: PathBuf::from("/retained").join(&relative),

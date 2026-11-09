@@ -3,7 +3,7 @@
 mod tests;
 use super::{
     Prepared,
-    history::{ChangedFileRecord, HistoryRevision},
+    history::{ChangeRevision, ChangedFileRecord},
     types::{FileIndex, LiveDocument},
 };
 #[cfg(test)]
@@ -144,7 +144,7 @@ pub(crate) struct ScheduledVerification {
     session: SessionId,
     service_id: Option<EditServiceId>,
     edit: EditorEditId,
-    revision: HistoryRevision,
+    revision: ChangeRevision,
     file: FileIndex,
     path: EditPath,
     target: VerificationTarget,
@@ -160,7 +160,7 @@ impl ScheduledVerification {
     pub(super) fn edit_id(&self) -> &EditorEditId {
         &self.edit
     }
-    pub(super) fn revision(&self) -> HistoryRevision {
+    pub(super) fn revision(&self) -> ChangeRevision {
         self.revision
     }
     pub(super) fn file(&self) -> FileIndex {
@@ -217,7 +217,7 @@ pub(crate) struct VerificationTicket {
     session: SessionId,
     service_id: Option<EditServiceId>,
     edit: EditorEditId,
-    revision: HistoryRevision,
+    revision: ChangeRevision,
     file: FileIndex,
     hash: ContentHash,
     document: DocumentStamp,
@@ -329,7 +329,7 @@ pub(super) fn capture(
 }
 pub(super) fn settle(
     changes: &mut VecDeque<ChangedFileRecord>,
-    revision: &mut HistoryRevision,
+    revision: &mut ChangeRevision,
     session: &SessionId,
     ticket: VerificationTicket,
     snapshot: &DiagnosticSnapshot,

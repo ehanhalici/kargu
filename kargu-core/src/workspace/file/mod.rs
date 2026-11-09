@@ -97,7 +97,7 @@ struct FilePath(PathBuf);
 impl TryFrom<PathBuf> for FilePath {
     type Error = CoreError;
     fn try_from(value: PathBuf) -> Result<Self, CoreError> {
-        super::command::validate_path(&value)?;
+        crate::domain::check_path(&value)?;
         if value.as_os_str().is_empty() || value.as_os_str().as_encoded_bytes().contains(&0) {
             return Err(CoreError::InvalidValue { field: "FilePath" });
         }

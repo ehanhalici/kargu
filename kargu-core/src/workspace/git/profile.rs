@@ -65,7 +65,8 @@ impl TryFrom<&[u8]> for Layout {
 }
 fn administrative_directory(value: Option<&str>) -> Result<Workspace, CoreError> {
     let path = PathBuf::from(value.ok_or(CoreError::InvalidToolOutput)?);
-    super::super::command::validate_path(&path)?;
+    // A path Git printed is tool output: an invalid one is malformed output.
+    crate::domain::check_path(&path).map_err(|_| CoreError::InvalidToolOutput)?;
     if !path.is_absolute() {
         return Err(CoreError::InvalidToolOutput);
     }

@@ -11,7 +11,7 @@ use globset::{GlobBuilder, GlobMatcher};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Instant,
 };
 use tokio_util::sync::CancellationToken;
@@ -77,12 +77,7 @@ impl TryFrom<FindFilesInput> for FindFilesPlan {
     fn try_from(input: FindFilesInput) -> Result<Self, CoreError> {
         let files = FileVisitLimit::try_from(input.max_files)?;
         let directories = DirectoryVisitLimit::try_from(input.max_directories)?;
-        let valid_path = |path: &Path| {
-            path.as_os_str().len() <= limits::SEARCH_PATH_BYTES
-                && !path
-                    .components()
-                    .any(|part| matches!(part, Component::ParentDir))
-        };
+        let valid_path = |path: &Path| crate::domain::check_path(path).is_ok();
         if !input.root.is_absolute()
             || !valid_path(&input.root)
             || input.path.as_ref().is_some_and(|p| !valid_path(p))

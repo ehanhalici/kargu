@@ -31,14 +31,8 @@ pub struct JournalDirectory(PathBuf);
 impl TryFrom<PathBuf> for JournalDirectory {
     type Error = CoreError;
     fn try_from(path: PathBuf) -> Result<Self, CoreError> {
-        let text = path.to_str().ok_or(EditError::InvalidPath)?;
-        if !path.is_absolute()
-            || text.len() > limits::SEARCH_PATH_BYTES
-            || text.chars().any(char::is_control)
-            || path
-                .components()
-                .any(|part| matches!(part, std::path::Component::ParentDir))
-        {
+        path.to_str().ok_or(EditError::InvalidPath)?;
+        if !path.is_absolute() || crate::domain::check_path(&path).is_err() {
             return Err(EditError::InvalidPath.into());
         }
         Ok(Self(path))

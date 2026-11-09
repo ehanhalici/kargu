@@ -303,14 +303,10 @@ fn check_owner(host: &Host, owner: &JobOwner) -> Result<(), CoreError> {
     if !host.owns_read_scope(&owner.scope) {
         return Err(CoreError::StaleOwner);
     }
-    if !owner.root.is_absolute()
-        || owner
-            .root
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
-    {
+    if !owner.root.is_absolute() {
         return Err(CoreError::Rejected);
     }
+    crate::domain::check_path(&owner.root)?;
     Ok(())
 }
 fn snapshot(id: &JobId, job: &Job, supervisor: &ProcessSupervisor) -> Result<Value, CoreError> {

@@ -442,6 +442,22 @@ impl ApiProviderId {
     }
 }
 
+/// The one rule for a path the editor or model names: bounded, free of
+/// control characters and of parent (`..`) components. Confinement to a grant
+/// is checked separately, against the canonical filesystem.
+pub fn check_path(path: &std::path::Path) -> Result<(), CoreError> {
+    let text = path.as_os_str();
+    if text.len() > limits::SEARCH_PATH_BYTES
+        || text.to_string_lossy().chars().any(char::is_control)
+        || path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(CoreError::Rejected);
+    }
+    Ok(())
+}
+
 /// Validated canonical tool or alias name; it is not an arbitrary RPC method.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String")]

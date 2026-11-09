@@ -48,7 +48,7 @@ pub(super) fn prepare(
     let timeout = u64::try_from(timeouts::WORKSPACE_READ.as_millis())
         .map_err(|_| CoreError::ArithmeticOverflow)?;
     match name.as_str() {
-        "bash" => {
+        crate::constants::protocol::BASH_TOOL => {
             let script = args
                 .get("command")
                 .and_then(Value::as_str)

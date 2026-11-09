@@ -2,10 +2,7 @@
 
 use crate::error::CoreError;
 use serde::Deserialize;
-use std::{
-    path::{Component, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 #[derive(Deserialize)]
 #[serde(try_from = "String")]
@@ -19,13 +16,7 @@ impl TryFrom<String> for ConfigurationPath {
     type Error = CoreError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let path = PathBuf::from(&value);
-        if value.len() > 4096
-            || value.chars().any(char::is_control)
-            || !path.is_absolute()
-            || path
-                .components()
-                .any(|part| matches!(part, Component::ParentDir))
-        {
+        if !path.is_absolute() || crate::domain::check_path(&path).is_err() {
             return Err(CoreError::InvalidValue {
                 field: "configuration_path",
             });

@@ -18,7 +18,7 @@ fn rows(session: &SessionId) -> Result<VecDeque<ChangedFileRecord>, Box<dyn std:
         session: session.clone(),
         service_id: None,
         edit_id: EditorEditId::new(),
-        revision: HistoryRevision::default(),
+        revision: ChangeRevision::default(),
         file: FileIndex::try_from(0)?,
         root: PathBuf::from("/owned"),
         full_path: PathBuf::from("/owned/file.txt"),
@@ -49,7 +49,7 @@ fn exact_fresh_clean_document_settles_only_its_captured_owner() -> TestResult {
     changes.push_back(editor);
     assert!(capture(&changes, &session, Path::new("/foreign"), &document()?).is_none());
     let ticket = capture(&changes, &session, Path::new("/owned"), &document()?).ok_or("ticket")?;
-    let mut revision = HistoryRevision::default();
+    let mut revision = ChangeRevision::default();
     assert!(settle(
         &mut changes,
         &mut revision,
@@ -93,7 +93,7 @@ fn incomplete_foreign_or_error_diagnostics_preserve_the_debt() -> TestResult {
             }
             _ => return Err("case".into()),
         }
-        let mut revision = HistoryRevision::default();
+        let mut revision = ChangeRevision::default();
         assert!(
             !settle(
                 &mut changes,
@@ -105,7 +105,7 @@ fn incomplete_foreign_or_error_diagnostics_preserve_the_debt() -> TestResult {
             "{case}"
         );
         assert!(changes.front().ok_or("row")?.verification_pending);
-        assert!(revision == HistoryRevision::default());
+        assert!(revision == ChangeRevision::default());
     }
     Ok(())
 }
@@ -131,7 +131,7 @@ fn reanchored_publication_and_changed_content_reject_an_old_capture() -> TestRes
         assert!(
             !settle(
                 &mut changes,
-                &mut HistoryRevision::default(),
+                &mut ChangeRevision::default(),
                 &session,
                 ticket,
                 &serde_json::from_value(snapshot())?
@@ -251,7 +251,7 @@ fn pre_existing_baseline_errors_settle_only_when_producer_document_and_hash_matc
                 .ok_or("exhausted note")?;
             assert!(exhausted.as_str().contains("SELF-HEALING BUDGET SPENT"));
         }
-        let mut revision = HistoryRevision::default();
+        let mut revision = ChangeRevision::default();
         let settled = settle(
             &mut changes,
             &mut revision,
@@ -301,7 +301,7 @@ fn second_edit_on_same_path_is_never_consumed_by_first_edit_late_diagnostic() ->
     row_b.final_hash = Some(ContentHash::try_from("b".repeat(64))?);
     row_b.document.as_mut().ok_or("doc")?.tick = super::super::types::DocumentTick::try_from(9)?;
 
-    let mut revision: HistoryRevision = serde_json::from_value(json!(2))?;
+    let mut revision: ChangeRevision = serde_json::from_value(json!(2))?;
     assert!(!settle(
         &mut changes,
         &mut revision,
@@ -381,7 +381,7 @@ fn delete_closed_file_and_explicit_service_retain_separate_publication_debt() ->
     assert_eq!(svc_sched.len(), 1);
     assert_eq!(svc_sched.first().ok_or("svc")?.service_id(), Some(&service));
     assert!(svc_sched.first().ok_or("svc")?.edit_id() == &changes.back().ok_or("back")?.edit_id);
-    assert!(svc_sched.first().ok_or("svc")?.revision() == HistoryRevision::default());
+    assert!(svc_sched.first().ok_or("svc")?.revision() == ChangeRevision::default());
     assert_eq!(svc_sched.first().ok_or("svc")?.file().get(), 0);
 
     let closed_doc: DocumentStamp =
@@ -397,7 +397,7 @@ fn delete_closed_file_and_explicit_service_retain_separate_publication_debt() ->
         (Path::new("/owned"), &document()?),
     )
     .ok_or("svc_ticket")?;
-    let mut revision = HistoryRevision::default();
+    let mut revision = ChangeRevision::default();
     assert!(settle(
         &mut changes,
         &mut revision,

@@ -2,7 +2,7 @@
 
 use super::command;
 use crate::{
-    constants::{limits, timeouts},
+    constants::timeouts,
     domain::Mode,
     domain::{ConfigRevision, PolicyRevision, ToolCallLimit},
     error::CoreError,
@@ -13,7 +13,7 @@ use serde::Deserialize;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 /// Client-captured listing configuration, not general-purpose command arguments.
@@ -32,11 +32,7 @@ impl ListFilesInput {
     pub(crate) fn prepare(self) -> Result<(CommandSpec, RunSettings), CoreError> {
         let path = self.path.as_deref().unwrap_or(Path::new("."));
         for input in [&self.root, path] {
-            if input.as_os_str().len() > limits::SEARCH_PATH_BYTES
-                || input.components().any(|c| c == Component::ParentDir)
-            {
-                return Err(CoreError::Rejected);
-            }
+            crate::domain::check_path(input)?;
         }
         if !self.root.is_absolute() {
             return Err(CoreError::Rejected);

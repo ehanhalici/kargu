@@ -24,7 +24,7 @@ pub(super) struct Repository {
 impl TryFrom<PathBuf> for Repository {
     type Error = CoreError;
     fn try_from(root: PathBuf) -> Result<Self, Self::Error> {
-        command::validate_path(&root)?;
+        crate::domain::check_path(&root)?;
         if !root.is_absolute() {
             return Err(CoreError::Rejected);
         }

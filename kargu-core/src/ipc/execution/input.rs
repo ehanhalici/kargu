@@ -201,9 +201,9 @@ impl ExecuteInput {
             reply: Reply::Command,
             command,
             settings,
-            tool: ToolName::try_from("bash".to_owned())?,
+            tool: ToolName::try_from(crate::constants::protocol::BASH_TOOL.to_owned())?,
         })
     }
 }
 
-pub(crate) use crate::workspace::command::validate_path;
+pub(crate) use crate::domain::check_path as validate_path;

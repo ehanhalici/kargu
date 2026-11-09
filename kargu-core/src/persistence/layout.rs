@@ -7,9 +7,7 @@
 use crate::error::CoreError;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
-use std::path::{Component, Path, PathBuf};
-
-const MAX_PATH_BYTES: usize = 4096;
+use std::path::{Path, PathBuf};
 
 /// Absolute path without parent components, as received from the editor.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,11 +17,7 @@ impl TryFrom<PathBuf> for AbsolutePath {
     type Error = &'static str;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let bounded = path.as_os_str().len() <= MAX_PATH_BYTES;
-        let plain = !path
-            .components()
-            .any(|component| component == Component::ParentDir);
-        if path.is_absolute() && bounded && plain {
+        if path.is_absolute() && crate::domain::check_path(&path).is_ok() {
             Ok(Self(path))
         } else {
             Err("storage paths must be bounded absolute paths")

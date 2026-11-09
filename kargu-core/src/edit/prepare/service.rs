@@ -67,7 +67,7 @@ pub(crate) struct EditPreparations {
     entries: HashMap<PreparationId, Entry>,
     snapshots: VecDeque<super::AppliedSnapshot>,
     changes: VecDeque<super::history::ChangedFileRecord>,
-    history_revision: super::history::HistoryRevision,
+    history_revision: super::history::ChangeRevision,
     // Closed identities remain tombstoned for the lifetime of their session;
     // delayed preparation or actual receipts cannot revive a retired service.
     services: HashMap<(SessionId, crate::domain::EditServiceId), ServiceState>,
@@ -489,7 +489,7 @@ impl EditPreparations {
                 return Err(CoreError::AlreadyCompleted);
             }
         }
-        crate::workspace::command::validate_path(&input.root)?;
+        crate::domain::check_path(&input.root)?;
         if !input.root.is_absolute() || input.root.as_os_str().as_encoded_bytes().contains(&0) {
             return Err(EditError::InvalidPath.into());
         }

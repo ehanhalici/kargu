@@ -115,14 +115,3 @@ pub(super) fn exclusions(names: Vec<String>) -> Result<Vec<String>, CoreError> {
         })
         .collect()
 }
-
-pub(crate) fn validate_path(path: &std::path::Path) -> Result<(), CoreError> {
-    if path.as_os_str().len() > crate::constants::limits::SEARCH_PATH_BYTES
-        || path
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-    {
-        return Err(CoreError::Rejected);
-    }
-    Ok(())
-}

@@ -83,7 +83,7 @@ pub(super) fn capture(
     context: &Preparation,
 ) -> Result<ActionSnapshot, CoreError> {
     for dir in [directory, common] {
-        crate::workspace::command::validate_path(dir)?;
+        crate::domain::check_path(dir)?;
         if !dir.is_absolute() || dir.canonicalize()? != dir || !dir.is_dir() {
             return Err(CoreError::Rejected);
         }

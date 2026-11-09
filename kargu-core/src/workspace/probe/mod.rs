@@ -99,7 +99,7 @@ struct ProbeDto {
 impl TryFrom<ProbeDto> for ProbeInput {
     type Error = CoreError;
     fn try_from(d: ProbeDto) -> Result<Self, CoreError> {
-        super::command::validate_path(&d.root)?;
+        crate::domain::check_path(&d.root)?;
         if !d.root.is_absolute()
             || d.profiles.len() > 64
             || d.executables.len() > 256
@@ -109,7 +109,7 @@ impl TryFrom<ProbeDto> for ProbeInput {
         }
         super::command::exclusions(d.skip_directories.clone())?;
         for p in &d.search_path {
-            super::command::validate_path(p)?;
+            crate::domain::check_path(p)?;
             if !p.is_absolute() {
                 return Err(CoreError::Rejected);
             }
@@ -174,7 +174,7 @@ fn validate(c: &Condition, depth: usize, count: &mut usize) -> Result<(), CoreEr
     }
     match c {
         Condition::Path { path } => {
-            super::command::validate_path(path)?;
+            crate::domain::check_path(path)?;
             if path.is_absolute() || path.as_os_str().is_empty() {
                 return Err(CoreError::Rejected);
             }

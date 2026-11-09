@@ -951,7 +951,7 @@ fn prepare_call(
             let path =
                 string_arg(&args, &["path", "file_path", "filePath"])?.filter(|value| value != ".");
             if let Some(path) = &path {
-                crate::workspace::command::validate_path(Path::new(path))?;
+                crate::domain::check_path(Path::new(path))?;
             }
             let input: crate::workspace::search::FindFilesInput = serde_json::from_value(json!({
                 "root": root,
@@ -970,7 +970,7 @@ fn prepare_call(
             let raw_path = string_arg(&args, &["file_path", "path", "filePath"])?
                 .ok_or(CoreError::InvalidValue { field: "FilePath" })?;
             let requested = Path::new(&raw_path);
-            crate::workspace::command::validate_path(requested)?;
+            crate::domain::check_path(requested)?;
             let relative = if requested.is_absolute() {
                 requested
                     .strip_prefix(root)
