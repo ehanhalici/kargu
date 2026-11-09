@@ -69,7 +69,7 @@ impl ApplicationActor {
             .iter()
             .chain(self.job_runs.values())
             .chain(self.editor_runs.values())
-            .any(|run| run.handle.scope.session_id() == session)
+            .any(|run| run.handle.scope().session_id() == session)
         {
             return Err(CoreError::Busy);
         }
@@ -99,10 +99,10 @@ impl ApplicationActor {
         message: Message,
     ) -> Result<MessageId, CoreError> {
         self.validate(run)?;
-        if run.scope.purpose() != RunPurpose::AgentTurn {
+        if run.scope().purpose() != RunPurpose::AgentTurn {
             return Err(CoreError::Rejected);
         }
-        let session = run.scope.session_id();
+        let session = run.scope().session_id();
         let projected = self
             .histories
             .get(session)
@@ -138,10 +138,10 @@ impl ApplicationActor {
             return Err(CoreError::AlreadyCompleted);
         }
         let already_settled = call.outcome.is_some();
-        if run.scope.purpose() != RunPurpose::AgentTurn {
+        if run.scope().purpose() != RunPurpose::AgentTurn {
             return Err(CoreError::Rejected);
         }
-        let session = run.scope.session_id();
+        let session = run.scope().session_id();
         let history = self.histories.get(session).ok_or(CoreError::StaleOwner)?;
         let provider = history
             .provider_id(native_id)
@@ -167,7 +167,7 @@ impl ApplicationActor {
         &mut self,
         run: &RunHandle,
         id: &crate::history::ProviderCallId,
-        registry: &crate::security::ToolRegistry,
+        registry: &crate::policy::ToolRegistry,
     ) -> Result<ToolCallId, CoreError> {
         self.validate(run)?;
         if run.scope().purpose() != RunPurpose::AgentTurn {
@@ -204,7 +204,7 @@ impl ApplicationActor {
                     .iter()
                     .chain(jobs.values())
                     .chain(edits.values())
-                    .any(|run| run.handle.scope.session_id() == session)
+                    .any(|run| run.handle.scope().session_id() == session)
         });
     }
 
@@ -229,7 +229,7 @@ impl ApplicationActor {
                     .iter()
                     .chain(self.job_runs.values())
                     .chain(self.editor_runs.values())
-                    .any(|run| run.handle.scope.session_id() == session))
+                    .any(|run| run.handle.scope().session_id() == session))
         {
             return Err(crate::history::fault(CoreError::Busy));
         }

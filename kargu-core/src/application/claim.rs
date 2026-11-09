@@ -7,23 +7,13 @@ use super::{
     RunSettings,
 };
 use crate::{
-    constants::limits,
     domain::{
-        ClaimId, ConfigRevision, Deadline, ExecutionTimeout, PolicyRevision, RunId, SessionId,
-        ToolCallLimit,
+        ConfigRevision, Deadline, ExecutionTimeout, PolicyRevision, SessionId, ToolCallLimit,
     },
     error::CoreError,
-    security::{ToolRegistry, Workspace},
+    policy::{ToolRegistry, Workspace},
 };
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
-use tokio::sync::Semaphore;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 /// Explicit requested root. Parsing is lexical and performs no filesystem IO.
@@ -89,9 +79,10 @@ impl RunClaim {
     }
     /// Reject cancelled, superseded or expired preparation.
     pub fn check_live(&self) -> Result<(), CoreError> {
-        if self.preparation.is_cancelled() || self.resources.cancellation.is_cancelled() {
+        if self.preparation.is_cancelled() {
             return Err(CoreError::Cancelled);
         }
+        self.resources.live()?;
         if self.deadline.expired() {
             return Err(CoreError::Deadline);
         }
@@ -99,7 +90,7 @@ impl RunClaim {
     }
     /// All acquired preparation resources have actually completed.
     pub fn drained(&self) -> bool {
-        self.resources.pending.load(Ordering::Acquire) == 0
+        self.resources.settled().is_ok()
     }
     fn same_owner(&self, other: &Self) -> bool {
         self.scope == other.scope && Arc::ptr_eq(&self.resources, &other.resources)
@@ -108,16 +99,8 @@ impl RunClaim {
     /// Keep it through actual worker/adapter join, even after cancellation.
     pub fn lease(&self) -> Result<ClaimLease, CoreError> {
         self.check_live()?;
-        self.resources
-            .pending
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                count.checked_add(1)
-            })
-            .map_err(|_| CoreError::ArithmeticOverflow)?;
         let lease = ClaimLease {
-            _lease: RunLease {
-                resources: self.resources.clone(),
-            },
+            _lease: self.resources.lease()?,
         };
         self.check_live()?;
         Ok(lease)
@@ -206,24 +189,14 @@ impl ApplicationActor {
         let deadline = intent.timeout.start()?;
         let claim = RunClaim {
             registry: self.registry.clone(),
-            scope: RunScope {
-                purpose: RunPurpose::AgentTurn,
-                application_id: self.id.clone(),
-                session_id: session.clone(),
-                run_id: RunId::new(),
-                claim_id: ClaimId::new(),
-                generation,
-                config_revision: intent.config_revision,
-                policy_revision: intent.policy_revision,
-            },
+            scope: RunScope::new(
+                RunPurpose::AgentTurn,
+                (self.id.clone(), session.clone()),
+                (generation, intent.config_revision, intent.policy_revision),
+            ),
             intent: Arc::new(intent),
             deadline,
-            resources: Arc::new(Resources {
-                cancellation: CancellationToken::new(),
-                pending: AtomicUsize::new(0),
-                process_slots: Arc::new(Semaphore::new(limits::RUN_PROCESSES)),
-                output: AtomicUsize::new(0),
-            }),
+            resources: Resources::fresh(),
             preparation: CancellationToken::new(),
         };
         self.generation = generation;
@@ -246,9 +219,7 @@ impl ApplicationActor {
             return Err(CoreError::StaleOwner);
         }
         prepared.claim.check_live()?;
-        if prepared.claim.resources.pending.load(Ordering::Acquire) != 1 {
-            return Err(CoreError::Busy);
-        }
+        prepared.claim.resources.solely_leased()?;
         let PreparedRun {
             claim,
             settings,
@@ -257,13 +228,11 @@ impl ApplicationActor {
         // No actor yield separates the final resource check, lease release and adoption.
         drop(lease);
         claim.preparation.cancel();
-        let handle = RunHandle {
-            registry: claim.registry,
-            scope: claim.scope,
+        let handle = RunHandle::new(
+            claim.scope,
             settings,
-            deadline: claim.deadline,
-            resources: claim.resources,
-        };
+            (claim.deadline, claim.resources, claim.registry),
+        );
         self.preparing = None;
         self.active = Some(ActiveRun {
             steps: HashMap::new(),
@@ -284,7 +253,7 @@ impl ApplicationActor {
             return Err(CoreError::StaleOwner);
         }
         pending.state = ClaimState::Draining;
-        pending.claim.resources.cancellation.cancel();
+        pending.claim.resources.cancel();
         pending.claim.preparation.cancel();
         Ok(())
     }
@@ -305,7 +274,7 @@ impl ApplicationActor {
             && session.is_none_or(|session| pending.claim.scope.session_id() == session)
         {
             pending.state = ClaimState::Draining;
-            pending.claim.resources.cancellation.cancel();
+            pending.claim.resources.cancel();
             pending.claim.preparation.cancel();
         }
     }

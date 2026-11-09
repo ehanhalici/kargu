@@ -7,12 +7,13 @@ use super::{
     types::{FileIndex, Part, RetainedBytes},
 };
 use crate::{
-    application::{Mode, RunHandle, RunSettings, ToolOutcome},
     constants::limits,
+    domain::Mode,
     domain::{CapturePolicy, OutputLimit, ToolCallLimit, ToolName},
     edit::{EditError, patch::OperationKind, types::EditText},
     error::CoreError,
     process::{CapturedOutput, ProcessResult},
+    run::{RunHandle, RunSettings, ToolOutcome},
     security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
     workspace::command::Preparation,
 };

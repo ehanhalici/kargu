@@ -49,12 +49,8 @@ primitive-boundary	src/application/host.rs	`prepare_edit` exposes a primitive ac
 primitive-boundary	src/application/host.rs	`prepare_workspace_read` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/host.rs	`release_application` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/mod.rs	`drained` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/application/mod.rs	`drained` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/mod.rs	`owns_session` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/application/mod.rs	`reserve_output` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/application/mod.rs	`same_owner` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/mod.rs	`session_count` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/application/mod.rs	`summary` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/selection.rs	`commit` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/steps.rs	`call_steps_settled` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/application/steps.rs	`settled` exposes a primitive across a module boundary; use a domain type
@@ -120,6 +116,9 @@ primitive-boundary	src/models/metadata/mod.rs	`request_parameters` exposes a pri
 primitive-boundary	src/models/numeric.rs	`per_million_label` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/models/service/mod.rs	`rpc` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/models/store/mod.rs	`snapshot_json` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/policy/catalog.rs	`description` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/policy/mod.rs	`permits_mode` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/policy/mod.rs	`same_capture` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/process/archive.rs	`discard` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/process/archive.rs	`push` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/process/archive.rs	`snapshot` exposes a primitive across a module boundary; use a domain type
@@ -134,14 +133,15 @@ primitive-boundary	src/providers/mod.rs	`endpoint_text` exposes a primitive acro
 primitive-boundary	src/providers/mod.rs	`keyless` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/providers/mod.rs	`local` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/providers/mod.rs	`prompt_caching` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/run.rs	`drained` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/run.rs	`reserve_output` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/run.rs	`same_owner` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/run.rs	`summary` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/action_snapshot.rs	`digest` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/security/catalog.rs	`description` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/delegated.rs	`complete_history` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/file.rs	`read` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/file.rs	`size` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/mod.rs	`pending_count` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/security/mod.rs	`permits_mode` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/security/mod.rs	`same_capture` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/mod.rs	`stop_on_bytes` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/read_target.rs	`immutable` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/coordinates.rs	`check_text` exposes a primitive across a module boundary; use a domain type
@@ -243,10 +243,6 @@ pub-field	src/application/host.rs	`ModelCatalogWork`: field `specs` is visible; 
 pub-field	src/application/host.rs	`ReadScope`: field `application_id` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`ReadScope`: field `session_id` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`ApplicationActor`: field `edits` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`RunSettings`: field `mode` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ToolResult`: field `is_error` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ToolResult`: field `outcome` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ToolResult`: field `tool_call_id` is visible; keep fields private and expose accessors
 pub-field	src/application/selection.rs	`Selection`: field `model` is visible; keep fields private and expose accessors
 pub-field	src/configuration/domain.rs	`ConfigurationSource`: field `tuple field` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `model` is visible; keep fields private and expose accessors
@@ -571,6 +567,10 @@ pub-field	src/process/mod.rs	`ProcessResult`: field `exit_code` is visible; keep
 pub-field	src/process/mod.rs	`ProcessResult`: field `outcome` is visible; keep fields private and expose accessors
 pub-field	src/process/mod.rs	`ProcessResult`: field `signal` is visible; keep fields private and expose accessors
 pub-field	src/providers/catalog_target/domain.rs	`NativeModels`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/run.rs	`RunSettings`: field `mode` is visible; keep fields private and expose accessors
+pub-field	src/run.rs	`ToolResult`: field `is_error` is visible; keep fields private and expose accessors
+pub-field	src/run.rs	`ToolResult`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/run.rs	`ToolResult`: field `tool_call_id` is visible; keep fields private and expose accessors
 pub-field	src/security/editor.rs	`EditorAdmissionInput`: field `action` is visible; keep fields private and expose accessors
 pub-field	src/security/editor.rs	`EditorAdmissionInput`: field `call_id` is visible; keep fields private and expose accessors
 pub-field	src/security/editor.rs	`EditorAdmissionInput`: field `presenter` is visible; keep fields private and expose accessors
@@ -674,8 +674,6 @@ too-many-parameters	src/application/history.rs	`complete_history_call` takes N p
 too-many-parameters	src/application/history.rs	`history_rpc` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/application/host.rs	`dispatch_budgeted` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/application/host.rs	`update_provider_models` takes N parameters (max N); introduce a parameter type
-too-many-parameters	src/application/mod.rs	`new` takes N parameters (max N); introduce a parameter type
-too-many-parameters	src/application/mod.rs	`persistent` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/application/mod.rs	`reserve_call` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/application/steps.rs	`abandon_step` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/application/steps.rs	`claim_step` takes N parameters (max N); introduce a parameter type
@@ -806,6 +804,8 @@ too-many-parameters	src/process/mod.rs	`supervise_child` takes N parameters (max
 too-many-parameters	src/process/mod.rs	`supervise` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/process/mod.rs	`try_read` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/process/termination.rs	`outcome` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/run.rs	`new` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/run.rs	`persistent` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/action_snapshot.rs	`capture` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/delegated.rs	`abandon_editor_tool` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/delegated.rs	`decide_editor_tool` takes N parameters (max N); introduce a parameter type

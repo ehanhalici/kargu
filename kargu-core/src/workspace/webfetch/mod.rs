@@ -72,10 +72,10 @@ pub(crate) struct FetchResult {
     truncated: bool,
 }
 impl FetchResult {
-    pub(crate) fn outcome(&self) -> crate::application::ToolOutcome {
+    pub(crate) fn outcome(&self) -> crate::run::ToolOutcome {
         match self.outcome {
-            FetchOutcome::Ok => crate::application::ToolOutcome::Ok,
-            FetchOutcome::HttpError => crate::application::ToolOutcome::Failed,
+            FetchOutcome::Ok => crate::run::ToolOutcome::Ok,
+            FetchOutcome::HttpError => crate::run::ToolOutcome::Failed,
         }
     }
     pub(crate) fn into_text(self) -> String {

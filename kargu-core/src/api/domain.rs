@@ -347,7 +347,7 @@ impl ChatConnection {
     }
     fn encode_turn_request(
         &self,
-        run: &crate::application::RunHandle,
+        run: &crate::run::RunHandle,
         canonical: &serde_json::value::RawValue,
     ) -> Result<HttpRequest, ApiError> {
         let value = serde_json::from_str(canonical.get()).map_err(|_| ApiError::InvalidRequest)?;

@@ -7,7 +7,7 @@ use super::{
     types::{FileIndex, OriginId, PreparationId, ReviewMode, SavePolicy},
 };
 use crate::{
-    application::Mode,
+    domain::Mode,
     domain::{ConfigRevision, PolicyRevision, SessionId},
     edit::{
         EditError,

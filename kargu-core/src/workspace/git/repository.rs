@@ -3,9 +3,10 @@
 use super::super::command;
 use super::profile::CapturedProfile;
 use crate::{
-    application::{Mode, RunSettings},
+    domain::Mode,
     domain::{CapturePolicy, ConfigRevision, OutputLimit, PolicyRevision, ToolCallLimit},
     error::CoreError,
+    run::RunSettings,
     security::{CommandEnvironment, CommandInput, CommandSpec, ReadTarget, Workspace},
 };
 use std::{

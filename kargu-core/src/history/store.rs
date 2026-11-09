@@ -2,9 +2,9 @@ use super::{
     HistoryBytes, HistoryError, HistoryRevision, Message, ProviderCall, ProviderCallId, Role,
 };
 use crate::{
-    application::{ToolOutcome, ToolResult},
     constants::limits,
     domain::{MessageId, ToolCallId, ToolSafetyLevel},
+    run::{ToolOutcome, ToolResult},
 };
 use std::{collections::HashMap, sync::Arc};
 

@@ -66,10 +66,8 @@ impl WorkspaceRead {
 }
 
 impl ReadResult {
-    pub(crate) fn into_tool_output(
-        self,
-    ) -> Result<(crate::application::ToolOutcome, String), CoreError> {
-        use crate::application::ToolOutcome;
+    pub(crate) fn into_tool_output(self) -> Result<(crate::run::ToolOutcome, String), CoreError> {
+        use crate::run::ToolOutcome;
         match self {
             Self::FindFiles(result) => Ok((ToolOutcome::Ok, result.text)),
             Self::File(result) => Ok((ToolOutcome::Ok, result.text)),

@@ -6,13 +6,11 @@ use super::{
     types::{Begin, Intent, Part},
 };
 use crate::{
-    application::{
-        RunHandle, ToolOutcome,
-        agent::{AgentTool, ToolAdmission},
-    },
+    application::agent::{AgentTool, ToolAdmission},
     domain::{ToolCallId, ToolName, ToolStepId},
     edit::{EditError, types::EditPath},
     error::CoreError,
+    run::{RunHandle, ToolOutcome},
     security::{ToolRoute, Workspace},
 };
 use serde_json::{Value, value::RawValue};

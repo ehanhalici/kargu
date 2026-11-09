@@ -4,8 +4,8 @@ use super::{
     types::{OriginId, PreparationId},
 };
 use crate::{
-    application::{Mode, PreparedEditorSettings, RunSettings},
     constants::timeouts,
+    domain::Mode,
     domain::ToolCallLimit,
     edit::{
         EditError,
@@ -14,6 +14,7 @@ use crate::{
         types::{CaptureDigest, EditorRevision},
     },
     error::CoreError,
+    run::{PreparedEditorSettings, RunSettings},
     security::file::checkpoint,
 };
 use std::{sync::Arc, time::Instant};

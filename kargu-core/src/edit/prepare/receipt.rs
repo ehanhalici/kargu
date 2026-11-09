@@ -361,13 +361,13 @@ impl VerifiedReceipt {
             &serde_json::to_vec(self).map_err(|_| CoreError::InvalidToolOutput)?,
         ))
     }
-    pub(crate) fn outcome(&self) -> crate::application::ToolOutcome {
+    pub(crate) fn outcome(&self) -> crate::run::ToolOutcome {
         match self.outcome {
-            BatchOutcome::AppliedFull => crate::application::ToolOutcome::Ok,
+            BatchOutcome::AppliedFull => crate::run::ToolOutcome::Ok,
             BatchOutcome::AppliedPartial | BatchOutcome::NotApplied => {
-                crate::application::ToolOutcome::Failed
+                crate::run::ToolOutcome::Failed
             }
-            BatchOutcome::OutcomeUnknown => crate::application::ToolOutcome::OutcomeUnknown,
+            BatchOutcome::OutcomeUnknown => crate::run::ToolOutcome::OutcomeUnknown,
         }
     }
     pub(crate) fn paged_summary(&self) -> serde_json::Value {

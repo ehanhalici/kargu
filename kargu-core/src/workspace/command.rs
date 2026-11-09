@@ -15,7 +15,7 @@ pub(crate) struct Preparation {
     cancel: CancellationToken,
 }
 impl Preparation {
-    pub(crate) fn for_run(run: &crate::application::RunHandle) -> Result<Self, CoreError> {
+    pub(crate) fn for_run(run: &crate::run::RunHandle) -> Result<Self, CoreError> {
         run.check_live()?;
         let mut context = Self::new()?;
         context.cancel = run.cancel_token();

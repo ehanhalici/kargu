@@ -6,10 +6,11 @@ use super::{
     },
 };
 use crate::{
-    application::{Mode, RunHandle},
     constants::limits,
+    domain::Mode,
     domain::{ConfigRevision, PolicyRevision},
     error::CoreError,
+    run::RunHandle,
     security::Workspace,
 };
 use serde_json::{Value, json};

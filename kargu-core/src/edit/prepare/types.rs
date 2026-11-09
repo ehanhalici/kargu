@@ -1,7 +1,7 @@
 //! Exact upload, editor identity and native filesystem evidence boundaries.
 use crate::{
-    application::Mode,
     constants::limits,
+    domain::Mode,
     domain::{ConfigRevision, PolicyRevision},
     edit::{
         EditError,

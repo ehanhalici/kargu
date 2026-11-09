@@ -2,9 +2,9 @@
 
 use super::Archive;
 use crate::{
-    application::RunHandle,
     domain::{CapturePolicy, CaptureStop, OutputRecords, RecordLimit},
     error::CoreError,
+    run::RunHandle,
 };
 use tokio::sync::watch;
 
@@ -153,11 +153,13 @@ impl RecordMonitor {
 mod tests {
     use super::*;
     use crate::{
-        application::{ApplicationActor, Mode, RunSettings},
+        application::ApplicationActor,
+        domain::Mode,
         domain::{
             ApplicationId, ByteOffset, ConfigRevision, OutputLimit, OutputRetention,
             PolicyRevision, ToolCallLimit,
         },
+        run::RunSettings,
         security::Workspace,
     };
     use std::time::Duration;

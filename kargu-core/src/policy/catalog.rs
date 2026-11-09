@@ -6,9 +6,8 @@ use super::{
     schema::{SchemaType, ToolDescription, ToolSchema},
 };
 use crate::{
-    application::Mode,
     constants::limits,
-    domain::{ToolName, ToolSafetyLevel},
+    domain::{Mode, ToolName, ToolSafetyLevel},
     error::CoreError,
 };
 use serde::{Deserialize, Serialize, Serializer};

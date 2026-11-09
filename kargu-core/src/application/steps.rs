@@ -271,7 +271,7 @@ mod tests {
             agent::{AgentOptions, AssistantTurn, ModelTurnLimit},
         },
         domain::{ApplicationId, ConfigRevision, PolicyRevision, ToolCallLimit},
-        security::{ToolRegistry, Workspace},
+        policy::{ToolRegistry, Workspace},
     };
     use serde_json::json;
 
@@ -382,9 +382,9 @@ mod tests {
         actor.cancel(&run)?;
         drop(call);
         let completion = actor.finish(&run)?;
-        assert_eq!(completion.tool_results.len(), 1);
+        assert_eq!(completion.tool_results().len(), 1);
         assert_eq!(
-            completion.tool_results.first().ok_or("result")?.outcome,
+            completion.tool_results().first().ok_or("result")?.outcome,
             ToolOutcome::Cancelled
         );
         Ok(())
@@ -414,9 +414,9 @@ mod tests {
             actor.cancel(&run)?;
             drop(call);
             let completion = actor.finish(&run)?;
-            assert_eq!(completion.tool_results.len(), 1);
+            assert_eq!(completion.tool_results().len(), 1);
             assert_eq!(
-                completion.tool_results.first().ok_or("result")?.outcome,
+                completion.tool_results().first().ok_or("result")?.outcome,
                 if write_started {
                     ToolOutcome::OutcomeUnknown
                 } else {

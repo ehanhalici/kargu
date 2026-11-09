@@ -128,13 +128,13 @@ struct Skill {
 pub(crate) struct SkillResult {
     text: String,
     #[serde(skip)]
-    outcome: crate::application::ToolOutcome,
+    outcome: crate::run::ToolOutcome,
     skills: Vec<SkillMetadata>,
     truncated: bool,
     skipped: usize,
 }
 impl SkillResult {
-    pub(crate) fn into_tool_output(self) -> (crate::application::ToolOutcome, String) {
+    pub(crate) fn into_tool_output(self) -> (crate::run::ToolOutcome, String) {
         (self.outcome, self.text)
     }
 }
@@ -165,11 +165,11 @@ fn render(
     skipped: usize,
 ) -> Result<SkillResult, CoreError> {
     let outcome = match &input.query {
-        Operation::Catalog {} => crate::application::ToolOutcome::Ok,
+        Operation::Catalog {} => crate::run::ToolOutcome::Ok,
         Operation::Load { name } if skills.iter().any(|skill| skill.metadata.name == name.0) => {
-            crate::application::ToolOutcome::Ok
+            crate::run::ToolOutcome::Ok
         }
-        Operation::Load { .. } => crate::application::ToolOutcome::Failed,
+        Operation::Load { .. } => crate::run::ToolOutcome::Failed,
     };
     let mut text = match &input.query {
         Operation::Catalog {} if skills.is_empty() => String::new(),

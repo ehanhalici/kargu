@@ -6,10 +6,11 @@ use super::{
     RegistryRevision, ToolDescriptor, ToolRegistry, ToolRoute, UserDecision,
 };
 use crate::{
-    application::{ApplicationActor, RunHandle, RunLease, RunScope, ToolOutcome},
+    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::{ApprovalId, MessageId, ToolCallId, ToolName, ToolSafetyLevel, ToolStepId},
     error::CoreError,
+    run::{RunHandle, RunLease, RunScope, ToolOutcome},
     sensors::{
         diagnostics::DocumentStamp,
         symbols::LanguageSource,

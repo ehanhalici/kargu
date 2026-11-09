@@ -7,13 +7,14 @@ use super::{
     repository::Repository,
 };
 use crate::{
-    application::{Mode, RunSettings, ToolOutcome},
     constants::{limits, timeouts},
+    domain::Mode,
     domain::{
         CapturePolicy, ConfigRevision, OutputLimit, PolicyRevision, SuccessCodes, ToolCallLimit,
         ToolName,
     },
     error::CoreError,
+    run::{RunSettings, ToolOutcome},
     security::{CommandEnvironment, CommandInput, CommandSpec},
 };
 use intent::{Branch, Mutation, Paths};

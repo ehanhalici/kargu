@@ -1,8 +1,8 @@
 //! Supervisor stop cause is distinct from both OS exit and capture observations.
 
 use crate::{
-    application::ToolOutcome,
     domain::{CaptureStop, SuccessCodes},
+    run::ToolOutcome,
 };
 use std::process::ExitStatus;
 

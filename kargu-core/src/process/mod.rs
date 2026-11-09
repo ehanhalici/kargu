@@ -5,10 +5,11 @@
 //! abrupt host death still require a separate OS containment capability.
 
 use crate::{
-    application::{ApplicationActor, RunHandle, RunLease, ToolOutcome},
+    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::{ByteLimit, ByteOffset, CaptureStop, JobId, ProcessId, ToolCallId, ToolStepId},
     error::CoreError,
+    run::{RunHandle, RunLease, ToolOutcome},
     security::AuthorizedCommand,
 };
 use futures_util::FutureExt;

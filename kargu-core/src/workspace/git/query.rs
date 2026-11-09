@@ -11,9 +11,9 @@ use super::{
     status::StatusReport,
 };
 use crate::{
-    application::{RunSettings, ToolOutcome},
     domain::{OutputLimit, ToolName},
     error::CoreError,
+    run::{RunSettings, ToolOutcome},
     security::CommandSpec,
 };
 use serde::Deserialize;

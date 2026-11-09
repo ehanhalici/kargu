@@ -2,10 +2,10 @@
 
 use super::{History, HistoryError, HistoryRevision, Message};
 use crate::{
-    application::ToolOutcome,
     constants::{limits, protocol::methods, timeouts},
     domain::{ApiPageBytes, ByteLimit, HistoryUploadId, SessionId},
     error::CoreError,
+    run::ToolOutcome,
     security::file::checkpoint,
 };
 use serde::{

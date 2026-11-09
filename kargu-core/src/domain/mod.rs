@@ -384,6 +384,20 @@ impl ByteLimit {
     pub const WIRE_MAX: Self = Self(limits::MAX_FRAME_BYTES);
 }
 
+/// Existing Kargu modes; execution is checked again after approval.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Read-only question mode.
+    Ask,
+    /// Read-only planning mode.
+    Plan,
+    /// Debugger-aware mode.
+    Debug,
+    /// General code and shell execution mode.
+    Agent,
+}
+
 /// Validated canonical tool or alias name; it is not an arbitrary RPC method.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String")]

@@ -2,10 +2,10 @@
 
 use super::OutputPage;
 use crate::{
-    application::RunHandle,
     constants::limits,
     domain::{ByteLimit, ByteOffset, OutputLimit, OutputRetention},
     error::CoreError,
+    run::RunHandle,
 };
 use std::collections::VecDeque;
 

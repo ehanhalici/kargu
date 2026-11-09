@@ -1,7 +1,7 @@
 //! Process pipes and bounded input acknowledgements, not lifecycle authority.
 
 use super::{Archive, InputMessage, activity::Activity, records::StreamCapture};
-use crate::{application::RunHandle, constants::limits, error::CoreError};
+use crate::{constants::limits, error::CoreError, run::RunHandle};
 use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},

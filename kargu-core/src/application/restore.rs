@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn restore_rejected_when_active_run_in_flight() -> TestResult {
         use crate::domain::{ConfigRevision, PolicyRevision, ToolCallLimit};
-        use crate::security::Workspace;
+        use crate::policy::Workspace;
         use std::time::Duration;
 
         let mut actor = ApplicationActor::new(ApplicationId::new());

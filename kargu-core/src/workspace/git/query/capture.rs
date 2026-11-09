@@ -2,9 +2,9 @@
 
 use super::{GitPrepared, GitReadReply, ReadPlan};
 use crate::{
-    application::ToolOutcome,
     domain::{OutputLimit, SuccessCodes},
     error::CoreError,
+    run::ToolOutcome,
     workspace::{
         command::Preparation,
         git::profile::{CONFIG_KEYS, CapturedProfile, Layout, SafeConfig},

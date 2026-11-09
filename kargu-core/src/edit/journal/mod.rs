@@ -7,7 +7,6 @@ mod metadata;
 mod retention;
 mod storage;
 use crate::{
-    application::RunScope,
     constants::limits,
     edit::{
         EditError,
@@ -15,6 +14,7 @@ use crate::{
         types::{CaptureDigest, EditorEditId, EditorRevision},
     },
     error::CoreError,
+    run::RunScope,
     security::file::checkpoint,
 };
 use metadata::StoredAction;

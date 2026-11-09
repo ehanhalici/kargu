@@ -2,7 +2,7 @@
 use super::{ActionDigest, CapturedAction, ExecutionGate, PendingApproval, ToolRegistry};
 use crate::edit::{prepare::FileIndex, types::EditText};
 use crate::{
-    application::{ApplicationActor, RunHandle, RunLease, RunScope, ToolOutcome},
+    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::{ApprovalId, ToolCallId, ToolName, ToolSafetyLevel, ToolStepId},
     edit::{
@@ -10,6 +10,7 @@ use crate::{
         types::{EditorRevision, ReviewMode},
     },
     error::CoreError,
+    run::{RunHandle, RunLease, RunScope, ToolOutcome},
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};

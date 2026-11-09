@@ -16,7 +16,7 @@ use crate::{
     history::{
         CompactKeep, HistoryRevision, Message, Role, StoredMessage, SummaryCandidate, SummaryText,
     },
-    security::{ToolRoute, UserDecision},
+    policy::{ToolRoute, UserDecision},
 };
 use response::Finish;
 use serde::{Deserialize, Serialize};

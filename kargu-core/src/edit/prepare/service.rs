@@ -5,8 +5,8 @@ use super::{
     types::{self, Begin, Intent, OriginId, Part, PreparationId},
 };
 use crate::{
-    application::Mode,
     constants::{limits, protocol::methods, timeouts},
+    domain::Mode,
     domain::rpc::Fault,
     domain::{ByteLimit, SessionId},
     edit::EditError,

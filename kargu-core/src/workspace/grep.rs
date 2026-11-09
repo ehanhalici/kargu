@@ -2,13 +2,14 @@
 
 use super::command;
 use crate::{
-    application::{Mode, RunSettings},
     constants::limits,
+    domain::Mode,
     domain::{
         CapturePolicy, ConfigRevision, OutputLimit, PolicyRevision, RecordLimit, SuccessCodes,
         ToolCallLimit,
     },
     error::CoreError,
+    run::RunSettings,
     security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
 };
 use serde::Deserialize;

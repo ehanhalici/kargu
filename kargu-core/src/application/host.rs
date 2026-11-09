@@ -1448,7 +1448,7 @@ impl Host {
                     return Err(capacity_fault());
                 }
                 let id = ApplicationId::new();
-                let registry = crate::security::ToolRegistry::standard().map_err(|_| {
+                let registry = crate::policy::ToolRegistry::standard().map_err(|_| {
                     Fault::new(
                         protocol::error_codes::INVALID_STATE,
                         "Tool manifest is invalid",
